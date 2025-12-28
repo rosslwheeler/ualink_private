@@ -1,0 +1,12 @@
+# Build directories
+build/
+*.o
+*.a
+
+# IDE
+.vscode/
+.clangd
+compile_flags.txt
+
+# macOS
+.DS_Store
