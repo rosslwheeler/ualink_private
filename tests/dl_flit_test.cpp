@@ -71,7 +71,7 @@ int main() {
 
   std::array<TlFlit, 2> tl_flits{first, second};
   std::size_t packed = 0;
-  const DlFlit flit = DlPacker::pack(tl_flits, header, &packed);
+  const DlFlit flit = DlSerializer::serialize(tl_flits, header, &packed);
 
   assert(packed == 2);
   {
@@ -88,12 +88,36 @@ int main() {
     reader.assert_expected(parsed, expected);
   }
 
-  const auto unpacked = DlUnpacker::unpack(flit);
+  const auto unpacked = DlDeserializer::deserialize(flit);
   assert(unpacked.size() == 2);
   assert(unpacked[0].message_field == 1);
   assert(unpacked[1].message_field == 2);
   assert(unpacked[0].data == first.data);
   assert(unpacked[1].data == second.data);
+
+  // Verify deserialized segment header matches original by re-encoding and validating with bit_fields
+  {
+    // Reconstruct segment header from deserialized flits (both in segment 0)
+    SegmentHeaderFields reconstructed{};
+    reconstructed.tl_flit0_present = true;
+    reconstructed.message0 = unpacked[0].message_field;
+    reconstructed.tl_flit1_present = true;
+    reconstructed.message1 = unpacked[1].message_field;
+    reconstructed.dl_alt_sector = false;
+
+    const std::byte re_encoded = encode_segment_header(reconstructed);
+    std::array<std::byte, 1> buffer{re_encoded};
+    bit_fields::NetworkBitReader reader(buffer);
+    const auto parsed = reader.deserialize(kSegmentHeaderFormat);
+    const std::array<bit_fields::ExpectedField, 5> expected{{
+        {"tl_flit1", 1U},
+        {"message1", 2U},
+        {"tl_flit0", 1U},
+        {"message0", 1U},
+        {"dl_alt_sector", 0U},
+    }};
+    reader.assert_expected(parsed, expected);
+  }
 
   const auto header_bytes = encode_explicit_flit_header(header);
   {
@@ -190,7 +214,7 @@ int main() {
                   static_cast<std::uint8_t>(flit_index & 0x3U));
   }
   std::size_t packed_many = 0;
-  const DlFlit packed_flit = DlPacker::pack(many_flits, header, &packed_many);
+  const DlFlit packed_flit = DlSerializer::serialize(many_flits, header, &packed_many);
   assert(packed_many == many_flits.size());
 
   const auto expected_segments = expected_segments_for_flits(many_flits);
@@ -209,11 +233,54 @@ int main() {
     reader.assert_expected(parsed, expected_fields);
   }
 
-  const auto unpacked_many = DlUnpacker::unpack(packed_flit);
+  const auto unpacked_many = DlDeserializer::deserialize(packed_flit);
   assert(unpacked_many.size() == many_flits.size());
   for (std::size_t flit_index = 0; flit_index < many_flits.size(); ++flit_index) {
     assert(unpacked_many[flit_index].message_field == many_flits[flit_index].message_field);
     assert(unpacked_many[flit_index].data == many_flits[flit_index].data);
+  }
+
+  // Verify deserialized segment headers match original by reconstructing and validating with bit_fields
+  // Build segment headers from deserialized flits
+  std::array<SegmentHeaderFields, kDlSegmentCount> reconstructed_segments{};
+  for (std::size_t flit_index = 0; flit_index < unpacked_many.size(); ++flit_index) {
+    const std::size_t payload_offset = flit_index * kTlFlitBytes;
+    std::size_t segment_index = kDlSegmentCount;
+    for (std::size_t index = 0; index < kSegmentPayloadOffsets.size(); ++index) {
+      const std::size_t segment_start = kSegmentPayloadOffsets[index];
+      const std::size_t segment_end = segment_start + kSegmentPayloadBytes[index];
+      if (payload_offset >= segment_start && payload_offset < segment_end) {
+        segment_index = index;
+        break;
+      }
+    }
+    assert(segment_index < kDlSegmentCount);
+    const std::size_t segment_start = kSegmentPayloadOffsets[segment_index];
+    const std::size_t delta = payload_offset - segment_start;
+    if (delta == 0) {
+      reconstructed_segments[segment_index].tl_flit0_present = true;
+      reconstructed_segments[segment_index].message0 = unpacked_many[flit_index].message_field;
+    } else {
+      reconstructed_segments[segment_index].tl_flit1_present = true;
+      reconstructed_segments[segment_index].message1 = unpacked_many[flit_index].message_field;
+    }
+  }
+
+  // Re-encode and validate each segment header
+  for (std::size_t segment_index = 0; segment_index < kDlSegmentCount; ++segment_index) {
+    const std::byte re_encoded = encode_segment_header(reconstructed_segments[segment_index]);
+    std::array<std::byte, 1> buffer{re_encoded};
+    bit_fields::NetworkBitReader reader(buffer);
+    const auto parsed = reader.deserialize(kSegmentHeaderFormat);
+    const SegmentHeaderFields& expected = expected_segments[segment_index];
+    const std::array<bit_fields::ExpectedField, 5> expected_fields{{
+        {"tl_flit1", expected.tl_flit1_present ? 1U : 0U},
+        {"message1", expected.message1},
+        {"tl_flit0", expected.tl_flit0_present ? 1U : 0U},
+        {"message0", expected.message0},
+        {"dl_alt_sector", expected.dl_alt_sector ? 1U : 0U},
+    }};
+    reader.assert_expected(parsed, expected_fields);
   }
 
   expect_invalid_argument([] {

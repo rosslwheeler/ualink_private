@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -103,16 +105,40 @@ struct DlFlit {
 [[nodiscard]] std::byte encode_segment_header(const SegmentHeaderFields& fields);
 [[nodiscard]] SegmentHeaderFields decode_segment_header(std::byte value);
 
-class DlPacker {
+// Forward declarations to avoid circular dependency
+class DlPacingController;
+class DlErrorInjector;
+
+class DlSerializer {
 public:
-  [[nodiscard]] static DlFlit pack(std::span<const TlFlit> tl_flits,
+  [[nodiscard]] static DlFlit serialize(std::span<const TlFlit> tl_flits,
                                   const ExplicitFlitHeaderFields& header,
-                                  std::size_t* flits_packed = nullptr);
+                                  std::size_t* flits_serialized = nullptr);
+
+  // Serialize with pacing controller
+  [[nodiscard]] static DlFlit serialize_with_pacing(std::span<const TlFlit> tl_flits,
+                                                const ExplicitFlitHeaderFields& header,
+                                                DlPacingController& pacing,
+                                                std::size_t* flits_serialized = nullptr);
+
+  // Serialize with error injection
+  [[nodiscard]] static DlFlit serialize_with_error_injection(std::span<const TlFlit> tl_flits,
+                                                          const ExplicitFlitHeaderFields& header,
+                                                          DlErrorInjector& error_injector,
+                                                          std::size_t* flits_serialized = nullptr);
 };
 
-class DlUnpacker {
+class DlDeserializer {
 public:
-  [[nodiscard]] static std::vector<TlFlit> unpack(const DlFlit& flit);
+  [[nodiscard]] static std::vector<TlFlit> deserialize(const DlFlit& flit);
+  [[nodiscard]] static std::optional<std::vector<TlFlit>> deserialize_with_crc_check(const DlFlit& flit);
+
+  // Deserialize with pacing controller for Rx rate adaptation
+  [[nodiscard]] static std::vector<TlFlit> deserialize_with_pacing(const DlFlit& flit,
+                                                               DlPacingController& pacing);
+  [[nodiscard]] static std::optional<std::vector<TlFlit>> deserialize_with_crc_and_pacing(
+      const DlFlit& flit,
+      DlPacingController& pacing);
 };
 
 }  // namespace ualink::dl

@@ -9,6 +9,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" F
 
 add_library(ualink_model STATIC
   src/dl_flit.cpp
+  src/crc.cpp
+  src/dl_replay.cpp
+  src/dl_pacing.cpp
+  src/dl_error_injection.cpp
+  src/tl_flit.cpp
 )
 
 target_include_directories(ualink_model
@@ -47,3 +52,73 @@ target_include_directories(ualink_dl_flit_test
 )
 
 add_test(NAME ualink_dl_flit_test COMMAND ualink_dl_flit_test)
+
+add_executable(ualink_crc_test
+  tests/crc_test.cpp
+)
+
+target_link_libraries(ualink_crc_test PRIVATE ualink_model)
+
+target_include_directories(ualink_crc_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_crc_test COMMAND ualink_crc_test)
+
+add_executable(ualink_dl_replay_test
+  tests/dl_replay_test.cpp
+)
+
+target_link_libraries(ualink_dl_replay_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_replay_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_replay_test COMMAND ualink_dl_replay_test)
+
+add_executable(ualink_dl_pacing_test
+  tests/dl_pacing_test.cpp
+)
+
+target_link_libraries(ualink_dl_pacing_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_pacing_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_pacing_test COMMAND ualink_dl_pacing_test)
+
+add_executable(ualink_dl_error_injection_test
+  tests/dl_error_injection_test.cpp
+)
+
+target_link_libraries(ualink_dl_error_injection_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_error_injection_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_error_injection_test COMMAND ualink_dl_error_injection_test)
+
+add_executable(ualink_tl_flit_test
+  tests/tl_flit_test.cpp
+)
+
+target_link_libraries(ualink_tl_flit_test PRIVATE ualink_model)
+
+target_include_directories(ualink_tl_flit_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_tl_flit_test COMMAND ualink_tl_flit_test)

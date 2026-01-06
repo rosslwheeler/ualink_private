@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "ualink/crc.h"
+#include "ualink/dl_error_injection.h"
+#include "ualink/dl_pacing.h"
+
 using namespace ualink::dl;
 
 static std::size_t segment_index_for_offset(std::size_t offset) {
@@ -186,9 +190,9 @@ SegmentHeaderFields ualink::dl::decode_segment_header(std::byte value) {
   return fields;
 }
 
-DlFlit ualink::dl::DlPacker::pack(std::span<const TlFlit> tl_flits,
+DlFlit ualink::dl::DlSerializer::serialize(std::span<const TlFlit> tl_flits,
                                  const ExplicitFlitHeaderFields& header,
-                                 std::size_t* flits_packed) {
+                                 std::size_t* flits_serialized) {
   UALINK_TRACE_SCOPED(__func__);
   DlFlit flit{};
   flit.flit_header = encode_explicit_flit_header(header);
@@ -221,14 +225,25 @@ DlFlit ualink::dl::DlPacker::pack(std::span<const TlFlit> tl_flits,
     flit.segment_headers[segment_index] = encode_segment_header(segment_fields[segment_index]);
   }
 
-  if (flits_packed != nullptr) {
-    *flits_packed = packed_count;
+  // Compute CRC over flit_header + segment_headers + payload
+  // Total: 3 + 5 + 628 = 636 bytes
+  constexpr std::size_t kCrcCoveredBytes = 3 + kDlSegmentCount + kDlPayloadBytes;
+  std::array<std::byte, kCrcCoveredBytes> crc_buffer{};
+
+  std::copy_n(flit.flit_header.begin(), 3, crc_buffer.begin());
+  std::copy_n(flit.segment_headers.begin(), kDlSegmentCount, crc_buffer.begin() + 3);
+  std::copy_n(flit.payload.begin(), kDlPayloadBytes, crc_buffer.begin() + 3 + kDlSegmentCount);
+
+  flit.crc = compute_crc32(crc_buffer);
+
+  if (flits_serialized != nullptr) {
+    *flits_serialized = packed_count;
   }
 
   return flit;
 }
 
-std::vector<TlFlit> ualink::dl::DlUnpacker::unpack(const DlFlit& flit) {
+std::vector<TlFlit> ualink::dl::DlDeserializer::deserialize(const DlFlit& flit) {
   UALINK_TRACE_SCOPED(__func__);
   std::vector<TlFlit> tl_flits;
 
@@ -257,4 +272,106 @@ std::vector<TlFlit> ualink::dl::DlUnpacker::unpack(const DlFlit& flit) {
   }
 
   return tl_flits;
+}
+
+std::optional<std::vector<TlFlit>> ualink::dl::DlDeserializer::deserialize_with_crc_check(
+    const DlFlit& flit) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // Verify CRC over flit_header + segment_headers + payload
+  constexpr std::size_t kCrcCoveredBytes = 3 + kDlSegmentCount + kDlPayloadBytes;
+  std::array<std::byte, kCrcCoveredBytes> crc_buffer{};
+
+  std::copy_n(flit.flit_header.begin(), 3, crc_buffer.begin());
+  std::copy_n(flit.segment_headers.begin(), kDlSegmentCount, crc_buffer.begin() + 3);
+  std::copy_n(flit.payload.begin(), kDlPayloadBytes, crc_buffer.begin() + 3 + kDlSegmentCount);
+
+  if (!verify_crc32(crc_buffer, flit.crc)) {
+    return std::nullopt;
+  }
+
+  return deserialize(flit);
+}
+
+DlFlit ualink::dl::DlSerializer::serialize_with_pacing(std::span<const TlFlit> tl_flits,
+                                               const ExplicitFlitHeaderFields& header,
+                                               DlPacingController& pacing,
+                                               std::size_t* flits_serialized) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // Check pacing before packing
+  const std::size_t flit_count = tl_flits.size();
+  const std::size_t total_bytes = flit_count * kTlFlitBytes;
+  const PacingDecision decision = pacing.check_tx_pacing(flit_count, total_bytes);
+
+  if (decision == PacingDecision::kDrop) {
+    // Return empty flit if dropped
+    if (flits_serialized != nullptr) {
+      *flits_serialized = 0;
+    }
+    return DlFlit{};
+  }
+
+  // If throttled, we still pack but signal may be used by caller
+  // (In a real system, caller would delay transmission)
+
+  return serialize(tl_flits, header, flits_serialized);
+}
+
+std::vector<TlFlit> ualink::dl::DlDeserializer::deserialize_with_pacing(const DlFlit& flit,
+                                                                 DlPacingController& pacing) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  std::vector<TlFlit> result = deserialize(flit);
+
+  // Notify pacing controller of received flits
+  const std::size_t flit_count = result.size();
+  const std::size_t total_bytes = flit_count * kTlFlitBytes;
+  pacing.notify_rx(flit_count, total_bytes, true);  // CRC not checked in this path
+
+  return result;
+}
+
+std::optional<std::vector<TlFlit>> ualink::dl::DlDeserializer::deserialize_with_crc_and_pacing(
+    const DlFlit& flit,
+    DlPacingController& pacing) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // Verify CRC first
+  std::optional<std::vector<TlFlit>> result = deserialize_with_crc_check(flit);
+
+  const bool crc_valid = result.has_value();
+  const std::size_t flit_count = crc_valid ? result->size() : 0;
+  const std::size_t total_bytes = flit_count * kTlFlitBytes;
+
+  // Notify pacing controller with CRC status
+  pacing.notify_rx(flit_count, total_bytes, crc_valid);
+
+  return result;
+}
+
+DlFlit ualink::dl::DlSerializer::serialize_with_error_injection(std::span<const TlFlit> tl_flits,
+                                                        const ExplicitFlitHeaderFields& header,
+                                                        DlErrorInjector& error_injector,
+                                                        std::size_t* flits_serialized) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // Check if flit should be dropped
+  if (error_injector.should_drop_flit()) {
+    if (flits_serialized != nullptr) {
+      *flits_serialized = 0;
+    }
+    return DlFlit{};  // Return empty flit for drop
+  }
+
+  // Serialize normally
+  DlFlit flit = serialize(tl_flits, header, flits_serialized);
+
+  // Get error type and inject if needed
+  const ErrorType error = error_injector.get_next_error();
+  if (error != ErrorType::kNone && error != ErrorType::kPacketDrop) {
+    flit = error_injector.inject_error(flit, error);
+  }
+
+  return flit;
 }
