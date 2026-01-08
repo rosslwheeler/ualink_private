@@ -18,8 +18,7 @@ static TlFlit make_flit(std::uint8_t seed, std::uint8_t message_bits) {
   return flit;
 }
 
-static std::array<SegmentHeaderFields, kDlSegmentCount> expected_segments_for_flits(
-    std::span<const TlFlit> tl_flits) {
+static std::array<SegmentHeaderFields, kDlSegmentCount> expected_segments_for_flits(std::span<const TlFlit> tl_flits) {
   UALINK_TRACE_SCOPED(__func__);
   std::array<SegmentHeaderFields, kDlSegmentCount> segments{};
 
@@ -53,7 +52,7 @@ static void expect_invalid_argument(void (*fn)()) {
   bool threw = false;
   try {
     fn();
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     threw = true;
   }
   assert(threw);
@@ -95,7 +94,7 @@ int main() {
   assert(unpacked[0].data == first.data);
   assert(unpacked[1].data == second.data);
 
-  // Verify deserialized segment header matches original by re-encoding and validating with bit_fields
+  // Verify deserialized segment header matches original by re-serializing and validating with bit_fields
   {
     // Reconstruct segment header from deserialized flits (both in segment 0)
     SegmentHeaderFields reconstructed{};
@@ -105,8 +104,8 @@ int main() {
     reconstructed.message1 = unpacked[1].message_field;
     reconstructed.dl_alt_sector = false;
 
-    const std::byte re_encoded = encode_segment_header(reconstructed);
-    std::array<std::byte, 1> buffer{re_encoded};
+    const std::byte re_serialized = serialize_segment_header(reconstructed);
+    std::array<std::byte, 1> buffer{re_serialized};
     bit_fields::NetworkBitReader reader(buffer);
     const auto parsed = reader.deserialize(kSegmentHeaderFormat);
     const std::array<bit_fields::ExpectedField, 5> expected{{
@@ -119,7 +118,7 @@ int main() {
     reader.assert_expected(parsed, expected);
   }
 
-  const auto header_bytes = encode_explicit_flit_header(header);
+  const auto header_bytes = serialize_explicit_flit_header(header);
   {
     std::array<std::byte, 3> buffer = header_bytes;
     bit_fields::NetworkBitReader reader(buffer);
@@ -149,7 +148,7 @@ int main() {
   command_header.ack_req_seq = 0x1FF;
   command_header.flit_seq_lo = 5;
 
-  const auto command_bytes = encode_command_flit_header(command_header);
+  const auto command_bytes = serialize_command_flit_header(command_header);
   {
     std::array<std::byte, 3> buffer = command_bytes;
     bit_fields::NetworkBitReader reader(buffer);
@@ -187,7 +186,7 @@ int main() {
             segment.message0 = message0;
             segment.dl_alt_sector = (dl_alt_sector != 0);
 
-            const std::byte encoded = encode_segment_header(segment);
+            const std::byte encoded = serialize_segment_header(segment);
             {
               std::array<std::byte, 1> buffer{encoded};
               bit_fields::NetworkBitReader reader(buffer);
@@ -210,8 +209,7 @@ int main() {
   std::array<TlFlit, 8> many_flits{};
   for (std::size_t flit_index = 0; flit_index < many_flits.size(); ++flit_index) {
     many_flits[flit_index] =
-        make_flit(static_cast<std::uint8_t>(0x10 + flit_index * 7),
-                  static_cast<std::uint8_t>(flit_index & 0x3U));
+        make_flit(static_cast<std::uint8_t>(0x10 + flit_index * 7), static_cast<std::uint8_t>(flit_index & 0x3U));
   }
   std::size_t packed_many = 0;
   const DlFlit packed_flit = DlSerializer::serialize(many_flits, header, &packed_many);
@@ -222,7 +220,7 @@ int main() {
     std::array<std::byte, 1> buffer{packed_flit.segment_headers[segment_index]};
     bit_fields::NetworkBitReader reader(buffer);
     const auto parsed = reader.deserialize(kSegmentHeaderFormat);
-    const SegmentHeaderFields& expected = expected_segments[segment_index];
+    const SegmentHeaderFields &expected = expected_segments[segment_index];
     const std::array<bit_fields::ExpectedField, 5> expected_fields{{
         {"tl_flit1", expected.tl_flit1_present ? 1U : 0U},
         {"message1", expected.message1},
@@ -266,13 +264,13 @@ int main() {
     }
   }
 
-  // Re-encode and validate each segment header
+  // Re-serialize and validate each segment header
   for (std::size_t segment_index = 0; segment_index < kDlSegmentCount; ++segment_index) {
-    const std::byte re_encoded = encode_segment_header(reconstructed_segments[segment_index]);
+    const std::byte re_encoded = serialize_segment_header(reconstructed_segments[segment_index]);
     std::array<std::byte, 1> buffer{re_encoded};
     bit_fields::NetworkBitReader reader(buffer);
     const auto parsed = reader.deserialize(kSegmentHeaderFormat);
-    const SegmentHeaderFields& expected = expected_segments[segment_index];
+    const SegmentHeaderFields &expected = expected_segments[segment_index];
     const std::array<bit_fields::ExpectedField, 5> expected_fields{{
         {"tl_flit1", expected.tl_flit1_present ? 1U : 0U},
         {"message1", expected.message1},
@@ -286,19 +284,19 @@ int main() {
   expect_invalid_argument([] {
     ExplicitFlitHeaderFields bad{};
     bad.op = 0x8;
-    [[maybe_unused]] const auto encoded = encode_explicit_flit_header(bad);
+    [[maybe_unused]] const auto encoded = serialize_explicit_flit_header(bad);
   });
 
   expect_invalid_argument([] {
     CommandFlitHeaderFields bad{};
     bad.ack_req_seq = 0x200;
-    [[maybe_unused]] const auto encoded = encode_command_flit_header(bad);
+    [[maybe_unused]] const auto encoded = serialize_command_flit_header(bad);
   });
 
   expect_invalid_argument([] {
     SegmentHeaderFields bad{};
     bad.message0 = 4;
-    [[maybe_unused]] const auto encoded = encode_segment_header(bad);
+    [[maybe_unused]] const auto encoded = serialize_segment_header(bad);
   });
 
   return 0;

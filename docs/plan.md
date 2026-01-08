@@ -13,24 +13,24 @@
 
 ## Phase 1: Data Link (DL) baseline (current)
 - Implement a logical 640B DL flit model with:
-  - Flit header encode/decode (explicit + command formats).
-  - Segment header encode/decode.
-  - Payload packing/unpacking of full 64B TL flits.
+  - Flit header serialize/deserialize (explicit + command formats).
+  - Segment header serialize/deserialize.
+  - Payload serializing/deserializing of full 64B TL flits.
 - Assumptions/staging for this phase:
   - Ideal PHY (no bit errors).
   - No CRC/replay/Tx pacing yet.
   - No alternative sectors (DL messages/UART stubbed).
-  - Only full TL flits are packed (no cross-flit partials yet).
+  - Only full TL flits are serialized (no cross-flit partials yet).
 - Tests:
-  - Segment header packing/unpacking.
-  - TL flit packing into segments with expected header bits.
+  - Segment header serializing/deserializing.
+  - TL flit serializing into segments with expected header bits.
 
 ### Phase 1 concrete tasks
-- Add tests for `encode_explicit_flit_header`/`decode_explicit_flit_header` round-trip.
-- Add tests for `encode_command_flit_header`/`decode_command_flit_header` round-trip.
-- Add tests for `encode_segment_header`/`decode_segment_header` for all bit combinations.
-- Add tests that pack/unpack multiple TL flits across segments, verifying segment headers.
-- Add tests that packing stops at `kDlPayloadBytes` capacity and reports `flits_packed`.
+- Add tests for `serialize_explicit_flit_header`/`deserialize_explicit_flit_header` round-trip.
+- Add tests for `serialize_command_flit_header`/`deserialize_command_flit_header` round-trip.
+- Add tests for `serialize_segment_header`/`deserialize_segment_header` for all bit combinations.
+- Add tests that serialize/deserialize multiple TL flits across segments, verifying segment headers.
+- Add tests that serializing stops at `kDlPayloadBytes` capacity and reports `flits_serialized`.
 - Add tests for invalid header fields throwing (range checks).
 
 ## Phase 2: Data Link robustness
@@ -40,14 +40,14 @@
 - Add error injection hooks for negative testing.
 
 ### Phase 2 concrete tasks
-- Define CRC polynomial/width in a header and add encode/decode helpers.
-- Add CRC to `DlPacker::pack` and validate in `DlUnpacker::unpack` with error reporting.
+- Define CRC polynomial/width in a header and add serialize/deserialize helpers.
+- Add CRC to `DlSerializer::serialize` and validate in `DlDeserializer::deserialize` with error reporting.
 - Add command flit handling for ack/replay sequence tracking and retry window.
-- Add pacing hooks (interfaces or callbacks) in pack/unpack to model rate limits.
+- Add pacing hooks (interfaces or callbacks) in serialize/deserialize to model rate limits.
 - Add error injection toggles for CRC failure and replay-triggered drops.
 
 ## Phase 3: Transaction Layer (TL) baseline
-- Implement TL flit and half-flit packing.
+- Implement TL flit and half-flit serializing.
 - Add basic request/response flows and flow control integration with DL.
 
 ## Phase 4: UPLI interface behavior

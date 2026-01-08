@@ -13,7 +13,9 @@ add_library(ualink_model STATIC
   src/dl_replay.cpp
   src/dl_pacing.cpp
   src/dl_error_injection.cpp
+  src/dl_command.cpp
   src/tl_flit.cpp
+  src/ualink_endpoint.cpp
 )
 
 target_include_directories(ualink_model
@@ -122,3 +124,31 @@ target_include_directories(ualink_tl_flit_test
 )
 
 add_test(NAME ualink_tl_flit_test COMMAND ualink_tl_flit_test)
+
+add_executable(ualink_endpoint_test
+  tests/ualink_endpoint_test.cpp
+)
+
+target_link_libraries(ualink_endpoint_test PRIVATE ualink_model)
+
+target_include_directories(ualink_endpoint_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_endpoint_test COMMAND ualink_endpoint_test)
+
+add_executable(ualink_dl_command_test
+  tests/dl_command_test.cpp
+)
+
+target_link_libraries(ualink_dl_command_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_command_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_command_test COMMAND ualink_dl_command_test)
