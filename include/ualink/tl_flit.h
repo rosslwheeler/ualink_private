@@ -118,8 +118,8 @@ public:
 
 class TlDeserializer {
 public:
-  // Decode TL opcode from flit
-  [[nodiscard]] static TlOpcode decode_opcode(std::span<const std::byte, kTlFlitBytes> flit);
+  // Deserialize TL opcode from flit
+  [[nodiscard]] static TlOpcode deserialize_opcode(std::span<const std::byte, kTlFlitBytes> flit);
 
   // Deserialize read request from TL flit
   [[nodiscard]] static std::optional<TlReadRequest> deserialize_read_request(
@@ -138,17 +138,17 @@ public:
       std::span<const std::byte, kTlFlitBytes> flit);
 };
 
-// Encode TL request header
-[[nodiscard]] std::array<std::byte, 8> encode_tl_request_header(const TlRequestHeader& header);
+// Serialize TL request header
+[[nodiscard]] std::array<std::byte, 8> serialize_tl_request_header(const TlRequestHeader& header);
 
-// Decode TL request header
-[[nodiscard]] TlRequestHeader decode_tl_request_header(std::span<const std::byte, 8> bytes);
+// Deserialize TL request header
+[[nodiscard]] TlRequestHeader deserialize_tl_request_header(std::span<const std::byte, 8> bytes);
 
-// Encode TL response header
-[[nodiscard]] std::array<std::byte, 4> encode_tl_response_header(const TlResponseHeader& header);
+// Serialize TL response header
+[[nodiscard]] std::array<std::byte, 4> serialize_tl_response_header(const TlResponseHeader& header);
 
-// Decode TL response header
-[[nodiscard]] TlResponseHeader decode_tl_response_header(std::span<const std::byte, 4> bytes);
+// Deserialize TL response header
+[[nodiscard]] TlResponseHeader deserialize_tl_response_header(std::span<const std::byte, 4> bytes);
 
 // Convert TlMessageType to message field value
 [[nodiscard]] constexpr std::uint8_t tl_message_type_to_field(TlMessageType type) noexcept {

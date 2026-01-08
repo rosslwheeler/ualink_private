@@ -181,7 +181,7 @@ void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
       transmit_callback_(*command_flit);
 
       // Update stats based on command type
-      const DlCommandOp op = command_processor_.decode_command_op(command_flit->flit_header);
+      const DlCommandOp op = command_processor_.deserialize_command_op(command_flit->flit_header);
       if (op == DlCommandOp::kAck) {
         stats_.tx_acks_sent++;
       } else if (op == DlCommandOp::kNak) {
@@ -342,8 +342,8 @@ void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
 void UaLinkEndpoint::handle_tl_flit(const TlFlit& tl_flit) {
   UALINK_TRACE_SCOPED(__func__);
 
-  // Decode opcode from flit data
-  const TlOpcode opcode = TlDeserializer::decode_opcode(tl_flit.data);
+  // Deserialize opcode from flit data
+  const TlOpcode opcode = TlDeserializer::deserialize_opcode(tl_flit.data);
 
   if (opcode == TlOpcode::kReadResponse) {
     // Handle read response

@@ -1,9 +1,11 @@
 #include "ualink/dl_flit.h"
 #include "ualink/trace.h"
 
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 
 using namespace ualink::dl;
@@ -130,17 +132,6 @@ int main() {
     }};
     reader.assert_expected(parsed, expected);
   }
-  {
-    std::array<std::byte, 3> buffer = header_bytes;
-    bit_fields::NetworkBitReader reader(buffer);
-    const auto parsed = reader.deserialize(kExplicitFlitHeaderFormat);
-    const std::array<bit_fields::ExpectedField, 3> expected{{
-        {"op", header.op},
-        {"payload", header.payload ? 1U : 0U},
-        {"flit_seq_no", header.flit_seq_no},
-    }};
-    reader.assert_expected(parsed, expected);
-  }
 
   CommandFlitHeaderFields command_header{};
   command_header.op = 3;
@@ -149,18 +140,6 @@ int main() {
   command_header.flit_seq_lo = 5;
 
   const auto command_bytes = serialize_command_flit_header(command_header);
-  {
-    std::array<std::byte, 3> buffer = command_bytes;
-    bit_fields::NetworkBitReader reader(buffer);
-    const auto parsed = reader.deserialize(kCommandFlitHeaderFormat);
-    const std::array<bit_fields::ExpectedField, 4> expected{{
-        {"op", command_header.op},
-        {"payload", command_header.payload ? 1U : 0U},
-        {"ack_req_seq", command_header.ack_req_seq},
-        {"flit_seq_lo", command_header.flit_seq_lo},
-    }};
-    reader.assert_expected(parsed, expected);
-  }
   {
     std::array<std::byte, 3> buffer = command_bytes;
     bit_fields::NetworkBitReader reader(buffer);
@@ -298,6 +277,14 @@ int main() {
     bad.message0 = 4;
     [[maybe_unused]] const auto encoded = serialize_segment_header(bad);
   });
+
+  // NOTE(bitwise-audit):
+  // I can't run greps from here, but these repo-root commands will inventory manual bitwise ops.
+  // Prefer to see masks/shifts only inside serialize_* / deserialize_* implementations.
+  //   rg -n -P '(?<!&)&(?!&)' src include tests
+  //   rg -n -P '(?<!\\|)\\|(?!\\|)' src include tests
+  //   rg -n '<<|>>' src include tests
+  // If you paste the output, we can identify places to replace with serialize/deserialize helpers.
 
   return 0;
 }

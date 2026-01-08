@@ -8,7 +8,7 @@
 
 using namespace ualink::tl;
 
-static void test_encode_decode_request_header() {
+static void test_serialize_deserialize_request_header() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlRequestHeader original{};
@@ -18,7 +18,7 @@ static void test_encode_decode_request_header() {
   original.tag = 0xABC;
   original.address = 0x123456789ABULL;
 
-  const std::array<std::byte, 8> encoded = encode_tl_request_header(original);
+  const std::array<std::byte, 8> encoded = serialize_tl_request_header(original);
 
   // Verify encoded bit fields
   {
@@ -38,17 +38,17 @@ static void test_encode_decode_request_header() {
   }
 
   // Verify decode produces same values
-  const TlRequestHeader decoded = decode_tl_request_header(encoded);
+  const TlRequestHeader decoded = deserialize_tl_request_header(encoded);
   assert(decoded.opcode == original.opcode);
   assert(decoded.half_flit == original.half_flit);
   assert(decoded.size == original.size);
   assert(decoded.tag == original.tag);
   assert(decoded.address == original.address);
 
-  std::cout << "test_encode_decode_request_header: PASS\n";
+  std::cout << "test_serialize_deserialize_request_header: PASS\n";
 }
 
-static void test_encode_decode_response_header() {
+static void test_serialize_deserialize_response_header() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlResponseHeader original{};
@@ -58,7 +58,7 @@ static void test_encode_decode_response_header() {
   original.tag = 0xDEF;
   original.data_valid = true;
 
-  const std::array<std::byte, 4> encoded = encode_tl_response_header(original);
+  const std::array<std::byte, 4> encoded = serialize_tl_response_header(original);
 
   // Verify encoded bit fields
   {
@@ -75,23 +75,23 @@ static void test_encode_decode_response_header() {
   }
 
   // Verify decode produces same values
-  const TlResponseHeader decoded = decode_tl_response_header(encoded);
+  const TlResponseHeader decoded = deserialize_tl_response_header(encoded);
   assert(decoded.opcode == original.opcode);
   assert(decoded.half_flit == original.half_flit);
   assert(decoded.status == original.status);
   assert(decoded.tag == original.tag);
   assert(decoded.data_valid == original.data_valid);
 
-  std::cout << "test_encode_decode_response_header: PASS\n";
+  std::cout << "test_serialize_deserialize_response_header: PASS\n";
 }
 
-static void test_pack_deserialize_read_request() {
+static void test_serialize_deserialize_read_request() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlReadRequest request{};
   request.header.opcode = TlOpcode::kReadRequest;
   request.header.half_flit = false;
-  request.header.size = 32;  // 6-bit field, max value is 63
+  request.header.size = 32; // 6-bit field, max value is 63
   request.header.tag = 0x123;
   request.header.address = 0x100000000ULL;
 
@@ -121,7 +121,7 @@ static void test_pack_deserialize_read_request() {
 
   // Verify unpacked header matches original using bit fields
   {
-    const std::array<std::byte, 8> unpacked_encoded = encode_tl_request_header(unpacked->header);
+    const std::array<std::byte, 8> unpacked_encoded = serialize_tl_request_header(unpacked->header);
     bit_fields::NetworkBitReader reader(unpacked_encoded);
     const auto parsed = reader.deserialize(kTlRequestHeaderFormat);
     const std::uint16_t address_hi = static_cast<std::uint16_t>((request.header.address >> 26) & 0xFFFFU);
@@ -137,10 +137,10 @@ static void test_pack_deserialize_read_request() {
     reader.assert_expected(parsed, expected);
   }
 
-  std::cout << "test_pack_deserialize_read_request: PASS\n";
+  std::cout << "test_serialize_deserialize_read_request: PASS\n";
 }
 
-static void test_pack_deserialize_read_response() {
+static void test_serialize_deserialize_read_response() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlReadResponse response{};
@@ -178,7 +178,7 @@ static void test_pack_deserialize_read_response() {
 
   // Verify unpacked header matches original using bit fields
   {
-    const std::array<std::byte, 4> unpacked_encoded = encode_tl_response_header(unpacked->header);
+    const std::array<std::byte, 4> unpacked_encoded = serialize_tl_response_header(unpacked->header);
     bit_fields::NetworkBitReader reader(unpacked_encoded);
     const auto parsed = reader.deserialize(kTlResponseHeaderFormat);
     const std::array<bit_fields::ExpectedField, 5> expected{{
@@ -196,16 +196,16 @@ static void test_pack_deserialize_read_response() {
     assert(unpacked->data[byte_index] == response.data[byte_index]);
   }
 
-  std::cout << "test_pack_deserialize_read_response: PASS\n";
+  std::cout << "test_serialize_deserialize_read_response: PASS\n";
 }
 
-static void test_pack_deserialize_write_request() {
+static void test_serialize_deserialize_write_request() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlWriteRequest request{};
   request.header.opcode = TlOpcode::kWriteRequest;
   request.header.half_flit = false;
-  request.header.size = 32;  // 6-bit field, max value is 63
+  request.header.size = 32; // 6-bit field, max value is 63
   request.header.tag = 0x456;
   request.header.address = 0x200000000ULL;
 
@@ -240,7 +240,7 @@ static void test_pack_deserialize_write_request() {
 
   // Verify unpacked header matches original using bit fields
   {
-    const std::array<std::byte, 8> unpacked_encoded = encode_tl_request_header(unpacked->header);
+    const std::array<std::byte, 8> unpacked_encoded = serialize_tl_request_header(unpacked->header);
     bit_fields::NetworkBitReader reader(unpacked_encoded);
     const auto parsed = reader.deserialize(kTlRequestHeaderFormat);
     const std::uint16_t address_hi = static_cast<std::uint16_t>((request.header.address >> 26) & 0xFFFFU);
@@ -261,10 +261,10 @@ static void test_pack_deserialize_write_request() {
     assert(unpacked->data[byte_index] == request.data[byte_index]);
   }
 
-  std::cout << "test_pack_deserialize_write_request: PASS\n";
+  std::cout << "test_serialize_deserialize_write_request: PASS\n";
 }
 
-static void test_pack_deserialize_write_completion() {
+static void test_serialize_deserialize_write_completion() {
   UALINK_TRACE_SCOPED(__func__);
 
   TlWriteCompletion completion{};
@@ -292,13 +292,12 @@ static void test_pack_deserialize_write_completion() {
     reader.assert_expected(parsed, expected);
   }
 
-  const std::optional<TlWriteCompletion> unpacked =
-      TlDeserializer::deserialize_write_completion(packed);
+  const std::optional<TlWriteCompletion> unpacked = TlDeserializer::deserialize_write_completion(packed);
   assert(unpacked.has_value());
 
   // Verify unpacked header matches original using bit fields
   {
-    const std::array<std::byte, 4> unpacked_encoded = encode_tl_response_header(unpacked->header);
+    const std::array<std::byte, 4> unpacked_encoded = serialize_tl_response_header(unpacked->header);
     bit_fields::NetworkBitReader reader(unpacked_encoded);
     const auto parsed = reader.deserialize(kTlResponseHeaderFormat);
     const std::array<bit_fields::ExpectedField, 5> expected{{
@@ -311,34 +310,34 @@ static void test_pack_deserialize_write_completion() {
     reader.assert_expected(parsed, expected);
   }
 
-  std::cout << "test_pack_deserialize_write_completion: PASS\n";
+  std::cout << "test_serialize_deserialize_write_completion: PASS\n";
 }
 
-static void test_decode_opcode() {
+static void test_deserialize_opcode() {
   UALINK_TRACE_SCOPED(__func__);
 
   // Test read request
   TlReadRequest read_req{};
   read_req.header.opcode = TlOpcode::kReadRequest;
   std::array<std::byte, kTlFlitBytes> flit = TlSerializer::serialize_read_request(read_req);
-  assert(TlDeserializer::decode_opcode(flit) == TlOpcode::kReadRequest);
+  assert(TlDeserializer::deserialize_opcode(flit) == TlOpcode::kReadRequest);
 
   // Test write request
   TlWriteRequest write_req{};
   write_req.header.opcode = TlOpcode::kWriteRequest;
   flit = TlSerializer::serialize_write_request(write_req);
-  assert(TlDeserializer::decode_opcode(flit) == TlOpcode::kWriteRequest);
+  assert(TlDeserializer::deserialize_opcode(flit) == TlOpcode::kWriteRequest);
 
   // Test read response
   TlReadResponse read_resp{};
   read_resp.header.opcode = TlOpcode::kReadResponse;
   flit = TlSerializer::serialize_read_response(read_resp);
-  assert(TlDeserializer::decode_opcode(flit) == TlOpcode::kReadResponse);
+  assert(TlDeserializer::deserialize_opcode(flit) == TlOpcode::kReadResponse);
 
-  std::cout << "test_decode_opcode: PASS\n";
+  std::cout << "test_deserialize_opcode: PASS\n";
 }
 
-static void test_unpack_wrong_opcode() {
+static void test_deserialize_wrong_opcode() {
   UALINK_TRACE_SCOPED(__func__);
 
   // Pack a read request
@@ -350,7 +349,7 @@ static void test_unpack_wrong_opcode() {
   const std::optional<TlWriteRequest> unpacked = TlDeserializer::deserialize_write_request(packed);
   assert(!unpacked.has_value());
 
-  std::cout << "test_unpack_wrong_opcode: PASS\n";
+  std::cout << "test_deserialize_wrong_opcode: PASS\n";
 }
 
 static void test_half_flit_flag() {
@@ -377,10 +376,10 @@ static void test_address_42_bits() {
 
   TlRequestHeader header{};
   header.opcode = TlOpcode::kReadRequest;
-  header.address = 0x3FFFFFFFFFFULL;  // Maximum 42-bit address
+  header.address = 0x3FFFFFFFFFFULL; // Maximum 42-bit address
 
-  const std::array<std::byte, 8> encoded = encode_tl_request_header(header);
-  const TlRequestHeader decoded = decode_tl_request_header(encoded);
+  const std::array<std::byte, 8> encoded = serialize_tl_request_header(header);
+  const TlRequestHeader decoded = deserialize_tl_request_header(encoded);
 
   assert(decoded.address == header.address);
 
@@ -392,10 +391,10 @@ static void test_tag_12_bits() {
 
   TlRequestHeader header{};
   header.opcode = TlOpcode::kReadRequest;
-  header.tag = 0xFFF;  // Maximum 12-bit tag
+  header.tag = 0xFFF; // Maximum 12-bit tag
 
-  const std::array<std::byte, 8> encoded = encode_tl_request_header(header);
-  const TlRequestHeader decoded = decode_tl_request_header(encoded);
+  const std::array<std::byte, 8> encoded = serialize_tl_request_header(header);
+  const TlRequestHeader decoded = deserialize_tl_request_header(encoded);
 
   assert(decoded.tag == header.tag);
 
@@ -424,14 +423,14 @@ static void test_message_type_conversion() {
 int main() {
   UALINK_TRACE_SCOPED(__func__);
 
-  test_encode_decode_request_header();
-  test_encode_decode_response_header();
-  test_pack_deserialize_read_request();
-  test_pack_deserialize_read_response();
-  test_pack_deserialize_write_request();
-  test_pack_deserialize_write_completion();
-  test_decode_opcode();
-  test_unpack_wrong_opcode();
+  test_serialize_deserialize_request_header();
+  test_serialize_deserialize_response_header();
+  test_serialize_deserialize_read_request();
+  test_serialize_deserialize_read_response();
+  test_serialize_deserialize_write_request();
+  test_serialize_deserialize_write_completion();
+  test_deserialize_opcode();
+  test_deserialize_wrong_opcode();
   test_half_flit_flag();
   test_address_42_bits();
   test_tag_12_bits();

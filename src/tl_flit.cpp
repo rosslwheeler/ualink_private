@@ -5,17 +5,17 @@
 
 using namespace ualink::tl;
 
-std::array<std::byte, 8> ualink::tl::encode_tl_request_header(const TlRequestHeader& header) {
+std::array<std::byte, 8> ualink::tl::serialize_tl_request_header(const TlRequestHeader& header) {
   UALINK_TRACE_SCOPED(__func__);
 
   if (header.tag > 0xFFF) {
-    throw std::invalid_argument("encode_tl_request_header: tag out of range");
+    throw std::invalid_argument("serialize_tl_request_header: tag out of range");
   }
   if (header.size > 0x3F) {
-    throw std::invalid_argument("encode_tl_request_header: size out of range");
+    throw std::invalid_argument("serialize_tl_request_header: size out of range");
   }
   if (header.address > 0x3FFFFFFFFFFULL) {
-    throw std::invalid_argument("encode_tl_request_header: address out of range (max 42 bits)");
+    throw std::invalid_argument("serialize_tl_request_header: address out of range (max 42 bits)");
   }
 
   std::array<std::byte, 8> buffer{};
@@ -36,7 +36,7 @@ std::array<std::byte, 8> ualink::tl::encode_tl_request_header(const TlRequestHea
   return buffer;
 }
 
-TlRequestHeader ualink::tl::decode_tl_request_header(std::span<const std::byte, 8> bytes) {
+TlRequestHeader ualink::tl::deserialize_tl_request_header(std::span<const std::byte, 8> bytes) {
   UALINK_TRACE_SCOPED(__func__);
 
   bit_fields::NetworkBitReader reader(bytes);
@@ -62,14 +62,14 @@ TlRequestHeader ualink::tl::decode_tl_request_header(std::span<const std::byte, 
   return header;
 }
 
-std::array<std::byte, 4> ualink::tl::encode_tl_response_header(const TlResponseHeader& header) {
+std::array<std::byte, 4> ualink::tl::serialize_tl_response_header(const TlResponseHeader& header) {
   UALINK_TRACE_SCOPED(__func__);
 
   if (header.tag > 0xFFF) {
-    throw std::invalid_argument("encode_tl_response_header: tag out of range");
+    throw std::invalid_argument("serialize_tl_response_header: tag out of range");
   }
   if (header.status > 0xF) {
-    throw std::invalid_argument("encode_tl_response_header: status out of range");
+    throw std::invalid_argument("serialize_tl_response_header: status out of range");
   }
 
   std::array<std::byte, 4> buffer{};
@@ -89,7 +89,7 @@ std::array<std::byte, 4> ualink::tl::encode_tl_response_header(const TlResponseH
   return buffer;
 }
 
-TlResponseHeader ualink::tl::decode_tl_response_header(std::span<const std::byte, 4> bytes) {
+TlResponseHeader ualink::tl::deserialize_tl_response_header(std::span<const std::byte, 4> bytes) {
   UALINK_TRACE_SCOPED(__func__);
 
   bit_fields::NetworkBitReader reader(bytes);
@@ -120,7 +120,7 @@ std::array<std::byte, kTlFlitBytes> TlSerializer::serialize_read_request(const T
   UALINK_TRACE_SCOPED(__func__);
 
   std::array<std::byte, kTlFlitBytes> flit{};
-  const std::array<std::byte, 8> header = encode_tl_request_header(request.header);
+  const std::array<std::byte, 8> header = serialize_tl_request_header(request.header);
 
   std::copy_n(header.begin(), 8, flit.begin());
 
@@ -135,7 +135,7 @@ std::array<std::byte, kTlFlitBytes> TlSerializer::serialize_read_response(const 
   UALINK_TRACE_SCOPED(__func__);
 
   std::array<std::byte, kTlFlitBytes> flit{};
-  const std::array<std::byte, 4> header = encode_tl_response_header(response.header);
+  const std::array<std::byte, 4> header = serialize_tl_response_header(response.header);
 
   std::copy_n(header.begin(), 4, flit.begin());
 
@@ -150,7 +150,7 @@ std::array<std::byte, kTlFlitBytes> TlSerializer::serialize_write_request(const 
   UALINK_TRACE_SCOPED(__func__);
 
   std::array<std::byte, kTlFlitBytes> flit{};
-  const std::array<std::byte, 8> header = encode_tl_request_header(request.header);
+  const std::array<std::byte, 8> header = serialize_tl_request_header(request.header);
 
   std::copy_n(header.begin(), 8, flit.begin());
 
@@ -166,7 +166,7 @@ std::array<std::byte, kTlFlitBytes> TlSerializer::serialize_write_completion(
   UALINK_TRACE_SCOPED(__func__);
 
   std::array<std::byte, kTlFlitBytes> flit{};
-  const std::array<std::byte, 4> header = encode_tl_response_header(completion.header);
+  const std::array<std::byte, 4> header = serialize_tl_response_header(completion.header);
 
   std::copy_n(header.begin(), 4, flit.begin());
 
@@ -176,7 +176,7 @@ std::array<std::byte, kTlFlitBytes> TlSerializer::serialize_write_completion(
   return flit;
 }
 
-TlOpcode TlDeserializer::decode_opcode(std::span<const std::byte, kTlFlitBytes> flit) {
+TlOpcode TlDeserializer::deserialize_opcode(std::span<const std::byte, kTlFlitBytes> flit) {
   UALINK_TRACE_SCOPED(__func__);
 
   // Opcode is in the first 3 bits
@@ -190,7 +190,7 @@ std::optional<TlReadRequest> TlDeserializer::deserialize_read_request(
     std::span<const std::byte, kTlFlitBytes> flit) {
   UALINK_TRACE_SCOPED(__func__);
 
-  const TlOpcode opcode = decode_opcode(flit);
+  const TlOpcode opcode = deserialize_opcode(flit);
   if (opcode != TlOpcode::kReadRequest) {
     return std::nullopt;
   }
@@ -198,7 +198,7 @@ std::optional<TlReadRequest> TlDeserializer::deserialize_read_request(
   TlReadRequest request{};
   std::array<std::byte, 8> header_bytes{};
   std::copy_n(flit.begin(), 8, header_bytes.begin());
-  request.header = decode_tl_request_header(header_bytes);
+  request.header = deserialize_tl_request_header(header_bytes);
 
   return request;
 }
@@ -207,7 +207,7 @@ std::optional<TlReadResponse> TlDeserializer::deserialize_read_response(
     std::span<const std::byte, kTlFlitBytes> flit) {
   UALINK_TRACE_SCOPED(__func__);
 
-  const TlOpcode opcode = decode_opcode(flit);
+  const TlOpcode opcode = deserialize_opcode(flit);
   if (opcode != TlOpcode::kReadResponse) {
     return std::nullopt;
   }
@@ -215,7 +215,7 @@ std::optional<TlReadResponse> TlDeserializer::deserialize_read_response(
   TlReadResponse response{};
   std::array<std::byte, 4> header_bytes{};
   std::copy_n(flit.begin(), 4, header_bytes.begin());
-  response.header = decode_tl_response_header(header_bytes);
+  response.header = deserialize_tl_response_header(header_bytes);
 
   // Copy response data (56 bytes)
   std::copy_n(flit.begin() + 4, response.data.size(), response.data.begin());
@@ -227,7 +227,7 @@ std::optional<TlWriteRequest> TlDeserializer::deserialize_write_request(
     std::span<const std::byte, kTlFlitBytes> flit) {
   UALINK_TRACE_SCOPED(__func__);
 
-  const TlOpcode opcode = decode_opcode(flit);
+  const TlOpcode opcode = deserialize_opcode(flit);
   if (opcode != TlOpcode::kWriteRequest) {
     return std::nullopt;
   }
@@ -235,7 +235,7 @@ std::optional<TlWriteRequest> TlDeserializer::deserialize_write_request(
   TlWriteRequest request{};
   std::array<std::byte, 8> header_bytes{};
   std::copy_n(flit.begin(), 8, header_bytes.begin());
-  request.header = decode_tl_request_header(header_bytes);
+  request.header = deserialize_tl_request_header(header_bytes);
 
   // Copy write data (56 bytes)
   std::copy_n(flit.begin() + 8, request.data.size(), request.data.begin());
@@ -247,7 +247,7 @@ std::optional<TlWriteCompletion> TlDeserializer::deserialize_write_completion(
     std::span<const std::byte, kTlFlitBytes> flit) {
   UALINK_TRACE_SCOPED(__func__);
 
-  const TlOpcode opcode = decode_opcode(flit);
+  const TlOpcode opcode = deserialize_opcode(flit);
   if (opcode != TlOpcode::kWriteCompletion) {
     return std::nullopt;
   }
@@ -255,7 +255,7 @@ std::optional<TlWriteCompletion> TlDeserializer::deserialize_write_completion(
   TlWriteCompletion completion{};
   std::array<std::byte, 4> header_bytes{};
   std::copy_n(flit.begin(), 4, header_bytes.begin());
-  completion.header = decode_tl_response_header(header_bytes);
+  completion.header = deserialize_tl_response_header(header_bytes);
 
   return completion;
 }

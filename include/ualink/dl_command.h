@@ -13,19 +13,19 @@ namespace ualink::dl {
 
 // DL command opcodes
 enum class DlCommandOp : std::uint8_t {
-  kExplicit = 0,      // Explicit flit with payload
-  kAck = 1,           // Acknowledge received flits
-  kNak = 2,           // Negative acknowledge - request retransmission
-  kLinkTraining = 3,  // Link training command
-  kFlowControl = 4,   // Flow control command
+  kExplicit = 0,     // Explicit flit with payload
+  kAck = 1,          // Acknowledge received flits
+  kNak = 2,          // Negative acknowledge - request retransmission
+  kLinkTraining = 3, // Link training command
+  kFlowControl = 4,  // Flow control command
   // 5-7 reserved
 };
 
 // ACK/NAK result for processing
 enum class AckNakStatus {
-  kSuccess,           // Command processed successfully
-  kSequenceError,     // Sequence number out of range
-  kNoRetransmit,      // NAK received but no flits to retransmit
+  kSuccess,       // Command processed successfully
+  kSequenceError, // Sequence number out of range
+  kNoRetransmit,  // NAK received but no flits to retransmit
 };
 
 // Command flit factory functions
@@ -41,7 +41,7 @@ namespace CommandFactory {
 // flit_seq_lo: lower 3 bits of our transmit sequence number
 [[nodiscard]] DlFlit create_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo);
 
-}  // namespace CommandFactory
+} // namespace CommandFactory
 
 // Callback types for command processing
 using AckCallback = std::function<void(std::uint16_t ack_seq)>;
@@ -62,13 +62,13 @@ public:
 
   // Process received DL flit - extracts and handles commands
   // Returns true if flit was a command (ACK/NAK), false if it was data
-  [[nodiscard]] bool process_flit(const DlFlit& flit);
+  [[nodiscard]] bool process_flit(const DlFlit &flit);
 
-  // Decode command opcode from flit header
-  [[nodiscard]] static DlCommandOp decode_command_op(std::span<const std::byte, 3> flit_header);
+  // Deserialize command opcode from flit header
+  [[nodiscard]] static DlCommandOp deserialize_command_op(std::span<const std::byte, 3> flit_header);
 
-  // Extract ACK/NAK sequence number from command flit
-  [[nodiscard]] static std::uint16_t extract_ack_req_seq(const DlFlit& flit);
+  // Deserialize ACK/NAK sequence number from command flit
+  [[nodiscard]] static std::uint16_t deserialize_ack_req_seq(const DlFlit &flit);
 
   // Clear callbacks
   void clear_callbacks() noexcept;
@@ -97,9 +97,7 @@ public:
 
   // Receive side: track received sequence numbers and generate ACK/NAK
   // Returns std::nullopt if no command needed, or the command flit to send
-  [[nodiscard]] std::optional<DlFlit> process_received_flit(
-      std::uint16_t received_seq,
-      std::uint8_t our_tx_seq_lo);
+  [[nodiscard]] std::optional<DlFlit> process_received_flit(std::uint16_t received_seq, std::uint8_t our_tx_seq_lo);
 
   // Get expected receive sequence number
   [[nodiscard]] std::uint16_t expected_rx_seq() const noexcept;
@@ -114,13 +112,13 @@ public:
   [[nodiscard]] DlFlit generate_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo);
 
   // Configure ACK policy
-  void set_ack_every_n_flits(std::size_t n) noexcept;  // 0 = ACK every flit
+  void set_ack_every_n_flits(std::size_t n) noexcept; // 0 = ACK every flit
   [[nodiscard]] std::size_t get_ack_every_n_flits() const noexcept;
 
 private:
   DlSequenceTracker rx_seq_tracker_{};
-  std::size_t ack_every_n_{0};       // 0 = ACK immediately, N = ACK every N flits
+  std::size_t ack_every_n_{0}; // 0 = ACK immediately, N = ACK every N flits
   std::size_t flits_since_ack_{0};
 };
 
-}  // namespace ualink::dl
+} // namespace ualink::dl
