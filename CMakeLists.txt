@@ -16,6 +16,7 @@ add_library(ualink_model STATIC
   src/dl_command.cpp
   src/tl_flit.cpp
   src/ualink_endpoint.cpp
+  src/upli_channel.cpp
 )
 
 target_include_directories(ualink_model
@@ -152,3 +153,17 @@ target_include_directories(ualink_dl_command_test
 )
 
 add_test(NAME ualink_dl_command_test COMMAND ualink_dl_command_test)
+
+add_executable(ualink_upli_channel_test
+  tests/upli_channel_test.cpp
+)
+
+target_link_libraries(ualink_upli_channel_test PRIVATE ualink_model)
+
+target_include_directories(ualink_upli_channel_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_upli_channel_test COMMAND ualink_upli_channel_test)
