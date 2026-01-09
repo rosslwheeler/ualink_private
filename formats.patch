@@ -1,0 +1,1733 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index cbc2c87..ea7ffb1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -6,6 +6,7 @@ project(ualink_model LANGUAGES CXX)
+ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_CXX_EXTENSIONS OFF)
++set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" FORCE)
+ 
+ add_library(ualink_model STATIC
+@@ -18,7 +19,10 @@ add_library(ualink_model STATIC
+   src/dl_error_injection.cpp
+   src/dl_command.cpp
+   src/tl_flit.cpp
++  src/tl_fields.cpp
++  src/dl_messages.cpp
++  src/security_iv.cpp
+   src/ualink_endpoint.cpp
+   src/upli_channel.cpp
+   src/upli_credit.cpp
+@@ -185,3 +189,54 @@ target_include_directories(ualink_upli_message_test
+ 
+ add_test(NAME ualink_upli_message_test COMMAND ualink_upli_message_test)
+ 
++add_executable(ualink_dl_messages_test
++  tests/dl_messages_test.cpp
++)
++
++target_link_libraries(ualink_dl_messages_test PRIVATE ualink_model)
++
++target_include_directories(ualink_dl_messages_test
++  PRIVATE
++    ${CMAKE_CURRENT_SOURCE_DIR}/include
++    /home/ross/OSS/ai/bit_fields_private/include
++)
++
++add_test(NAME ualink_dl_messages_test COMMAND ualink_dl_messages_test)
++
++add_executable(ualink_tl_fields_test
++  tests/tl_fields_test.cpp
++)
++
++target_link_libraries(ualink_tl_fields_test PRIVATE ualink_model)
++
++target_include_directories(ualink_tl_fields_test
++  PRIVATE
++    ${CMAKE_CURRENT_SOURCE_DIR}/include
++    /home/ross/OSS/ai/bit_fields_private/include
++)
++
++add_test(NAME ualink_tl_fields_test COMMAND ualink_tl_fields_test)
++
++add_executable(ualink_security_iv_test
++  tests/security_iv_test.cpp
++)
++
++target_link_libraries(ualink_security_iv_test PRIVATE ualink_model)
++
++target_include_directories(ualink_security_iv_test
++  PRIVATE
++    ${CMAKE_CURRENT_SOURCE_DIR}/include
++    /home/ross/OSS/ai/bit_fields_private/include
++)
++
++add_test(NAME ualink_security_iv_test COMMAND ualink_security_iv_test)
+diff --git a/include/ualink/dl_messages.h b/include/ualink/dl_messages.h
+new file mode 100644
+index 0000000..6c3d8d8
+--- /dev/null
++++ b/include/ualink/dl_messages.h
+@@ -0,0 +1,307 @@
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <span>
++#include <vector>
++
++#include "bit_fields/bit_fields.h"
++#include "ualink/trace.h"
++
++namespace ualink::dl {
++
++// =============================================================================
++// DL Message DW formats (Specification tables in Chapter 6)
++// All "Compressed" bits are specified as 0 (not supported).
++// Bit ordering follows existing usage: fields are listed MSB->LSB.
++// =============================================================================
++
++// Table 6-10: UART Stream Reset Request (DW0)
++inline constexpr bit_fields::PacketFormat<7> kUartStreamResetRequestFormat{{{
++    {"_reserved_hi", 19},  // [31:13]
++    {"all_streams", 1},    // [12]
++    {"stream_id", 3},      // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-11: UART Stream Reset Response (DW0)
++inline constexpr bit_fields::PacketFormat<8> kUartStreamResetResponseFormat{{{
++    {"_reserved_hi", 16},  // [31:16]
++    {"status", 3},         // [15:13]
++    {"all_streams", 1},    // [12]
++    {"stream_id", 3},      // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-12: UART Stream transport message (DW0 header + payload DWs)
++inline constexpr bit_fields::PacketFormat<8> kUartStreamTransportHeaderFormat{{{
++    {"length", 5},         // [31:27] = payload_dw_count - 1
++    {"_reserved_hi", 15},  // [26:12]
++    {"stream_id", 3},      // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-13: UART Stream Credit Update (DW0)
++inline constexpr bit_fields::PacketFormat<8> kUartStreamCreditUpdateFormat{{{
++    {"data_fc_seq", 12},   // [31:20]
++    {"_reserved_hi", 8},   // [19:12]
++    {"stream_id", 3},      // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-4: TL Rate Notification (DW0)
++inline constexpr bit_fields::PacketFormat<9> kTlRateNotificationFormat{{{
++    {"rate", 16},          // [31:16]
++    {"_reserved_hi", 3},   // [15:13]
++    {"ack", 1},            // [12]
++    {"_reserved_mid", 3},  // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-5: Device ID Request/Response (DW0)
++inline constexpr bit_fields::PacketFormat<11> kDeviceIdFormat{{{
++    {"valid", 1},          // [31]
++    {"type", 2},           // [30:29]
++    {"_reserved0", 3},     // [28:26]
++    {"id", 10},            // [25:16]
++    {"_reserved1", 3},     // [15:13]
++    {"ack", 1},            // [12]
++    {"_reserved2", 3},     // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved3", 1},     // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-6: Port ID Request/Response (DW0)
++inline constexpr bit_fields::PacketFormat<10> kPortIdFormat{{{
++    {"valid", 1},          // [31]
++    {"_reserved0", 3},     // [30:28]
++    {"port_number", 12},   // [27:16] (spec text says "10-bit port number")
++    {"_reserved1", 3},     // [15:13]
++    {"ack", 1},            // [12]
++    {"_reserved2", 3},     // [11:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved3", 1},     // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-7: No-Op Message (DW0)
++inline constexpr bit_fields::PacketFormat<6> kNoOpMessageFormat{{{
++    {"_reserved_hi", 23},  // [31:9]
++    {"mtype", 3},          // [8:6]
++    {"mclass", 4},         // [5:2]
++    {"_reserved", 1},      // [1]
++    {"compressed", 1},     // [0]
++}}};
++
++// Table 6-8: Channel Negotiation (DW0)
++inline constexpr bit_fields::PacketFormat<10> kChannelNegotiationFormat{{{
++    {"_reserved0", 4},      // [31:28]
++    {"channel_response", 4},// [27:24]
++    {"channel_command", 4}, // [23:20]
++    {"channel_target", 4},  // [19:16]
++    {"_reserved1", 7},      // [15:9]
++    {"mtype", 3},           // [8:6]
++    {"mclass", 4},          // [5:2]
++    {"_reserved2", 1},      // [1]
++    {"compressed", 1},      // [0]
++}}};
++
++// Table 6-9: Vendor Defined Packet Type Length (TL) DWord (DW0)
++inline constexpr bit_fields::PacketFormat<3> kVendorDefinedTlDwordFormat{{{
++    {"vendor_id", 16},  // [31:16]
++    {"type", 8},        // [15:8]
++    {"length", 8},      // [7:0] = payload_dwords - 1
++}}};
++
++struct DlMessageHeaderCommon {
++  std::uint8_t mtype{0};
++  std::uint8_t mclass{0};
++};
++
++struct UartStreamResetRequest {
++  bool all_streams{false};
++  std::uint8_t stream_id{0};
++  DlMessageHeaderCommon common{};
++};
++
++struct UartStreamResetResponse {
++  std::uint8_t status{0};
++  bool all_streams{false};
++  std::uint8_t stream_id{0};
++  DlMessageHeaderCommon common{};
++};
++
++struct UartStreamTransportMessage {
++  std::uint8_t stream_id{0};
++  DlMessageHeaderCommon common{};
++  std::vector<std::uint32_t> payload_dwords{};  // 1..32 (spec allows more; length is 5 bits => up to 32 here)
++};
++
++struct UartStreamCreditUpdate {
++  std::uint16_t data_fc_seq{0};  // 12 bits
++  std::uint8_t stream_id{0};
++  DlMessageHeaderCommon common{};
++};
++
++struct TlRateNotification {
++  std::uint16_t rate{0};
++  bool ack{false};
++  DlMessageHeaderCommon common{};
++};
++
++enum class DeviceType : std::uint8_t {
++  kSwitch = 0,
++  kAccelerator = 1,
++};
++
++struct DeviceIdMessage {
++  bool valid{false};
++  DeviceType type{DeviceType::kSwitch};
++  std::uint16_t id{0};  // 10 bits
++  bool ack{false};
++  DlMessageHeaderCommon common{};
++};
++
++struct PortIdMessage {
++  bool valid{false};
++  std::uint16_t port_number{0}; // spec text says 10-bit; encoded field spans [27:16]
++  bool ack{false};
++  DlMessageHeaderCommon common{};
++};
++
++struct NoOpMessage {
++  DlMessageHeaderCommon common{};
++};
++
++struct ChannelNegotiation {
++  std::uint8_t channel_response{0};
++  std::uint8_t channel_command{0};
++  std::uint8_t channel_target{0};
++  DlMessageHeaderCommon common{};
++};
++
++struct VendorDefinedTlDword {
++  std::uint16_t vendor_id{0};
++  std::uint8_t type{0};
++  std::uint8_t length{0};
++};
++
++// =============================================================================
++// Serialize/Deserialize (DW-level)
++// =============================================================================
++
++[[nodiscard]] std::array<std::byte, 4> serialize_uart_stream_reset_request(const UartStreamResetRequest& msg);
++[[nodiscard]] std::optional<UartStreamResetRequest> deserialize_uart_stream_reset_request(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_uart_stream_reset_response(const UartStreamResetResponse& msg);
++[[nodiscard]] std::optional<UartStreamResetResponse> deserialize_uart_stream_reset_response(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::vector<std::byte> serialize_uart_stream_transport_message(const UartStreamTransportMessage& msg);
++[[nodiscard]] std::optional<UartStreamTransportMessage> deserialize_uart_stream_transport_message(
++    std::span<const std::byte> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_uart_stream_credit_update(const UartStreamCreditUpdate& msg);
++[[nodiscard]] std::optional<UartStreamCreditUpdate> deserialize_uart_stream_credit_update(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_tl_rate_notification(const TlRateNotification& msg);
++[[nodiscard]] std::optional<TlRateNotification> deserialize_tl_rate_notification(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_device_id_message(const DeviceIdMessage& msg);
++[[nodiscard]] std::optional<DeviceIdMessage> deserialize_device_id_message(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_port_id_message(const PortIdMessage& msg);
++[[nodiscard]] std::optional<PortIdMessage> deserialize_port_id_message(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_no_op_message(const NoOpMessage& msg);
++[[nodiscard]] std::optional<NoOpMessage> deserialize_no_op_message(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_channel_negotiation(const ChannelNegotiation& msg);
++[[nodiscard]] std::optional<ChannelNegotiation> deserialize_channel_negotiation(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_vendor_defined_tl_dword(const VendorDefinedTlDword& msg);
++[[nodiscard]] VendorDefinedTlDword deserialize_vendor_defined_tl_dword(
++    std::span<const std::byte, 4> bytes);
++
++}  // namespace ualink::dl
+diff --git a/include/ualink/security_iv.h b/include/ualink/security_iv.h
+new file mode 100644
+index 0000000..74c93ee
+--- /dev/null
++++ b/include/ualink/security_iv.h
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <span>
++
++#include "bit_fields/bit_fields.h"
++#include "ualink/trace.h"
++
++namespace ualink::security {
++
++// Table 9-3: IV Format
++// IV is 96 bits total:
++//   Fixed field [95:32] set to 0
++//   Invocation field [31:0] counter
++inline constexpr bit_fields::PacketFormat<2> kIvFormat{{{
++    {"fixed", 64},        // [95:32]
++    {"invocation", 32},   // [31:0]
++}}};
++
++struct Iv96 {
++  std::uint32_t invocation{0};
++};
++
++[[nodiscard]] std::array<std::byte, 12> serialize_iv96(const Iv96& iv);
++[[nodiscard]] std::optional<Iv96> deserialize_iv96(std::span<const std::byte, 12> bytes);
++
++}  // namespace ualink::security
+diff --git a/include/ualink/tl_fields.h b/include/ualink/tl_fields.h
+new file mode 100644
+index 0000000..9c8a3b0
+--- /dev/null
++++ b/include/ualink/tl_fields.h
+@@ -0,0 +1,254 @@
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <span>
++
++#include "bit_fields/bit_fields.h"
++#include "ualink/trace.h"
++
++namespace ualink::tl {
++
++// =============================================================================
++// TL Field Formats (Specification Chapter 5)
++// =============================================================================
++
++enum class TlFieldType : std::uint8_t {
++  kFlowControlNop = 0x0,
++  kUncompressedRequest = 0x1,
++  kUncompressedResponse = 0x2,
++  kCompressedRequest = 0x3,
++  kCompressedResponseSingleBeatRead = 0x4,
++  kCompressedResponseWriteOrMultiBeatRead = 0x5,
++};
++
++// Table 5-29: Uncompressed Request Field (128 bits)
++inline constexpr bit_fields::PacketFormat<15> kUncompressedRequestFieldFormat{{{
++    {"ftype", 4},      // [127:124] = 0x1
++    {"cmd", 6},        // [123:118]
++    {"vchan", 2},      // [117:116]
++    {"asi", 2},        // [115:114]
++    {"tag", 11},       // [113:103]
++    {"pool", 1},       // [102]
++    {"attr", 8},       // [101:94]
++    {"len", 6},        // [93:88]
++    {"metadata", 8},   // [87:80]
++    {"addr", 55},      // [79:25]  (ReqAddr[56:2])
++    {"srcaccid", 10},  // [24:15]
++    {"dstaccid", 10},  // [14:5]
++    {"cload", 1},      // [4]
++    {"cway", 2},       // [3:2]
++    {"numbeats", 2},   // [1:0]
++}}};
++
++// Table 5-30: Uncompressed Response Field (64 bits)
++inline constexpr bit_fields::PacketFormat<13> kUncompressedResponseFieldFormat{{{
++    {"ftype", 4},      // [63:60] = 0x2
++    {"vchan", 2},      // [59:58]
++    {"tag", 11},       // [57:47]
++    {"pool", 1},       // [46]
++    {"len", 2},        // [45:44]
++    {"offset", 2},     // [43:42]
++    {"status", 4},     // [41:38]
++    {"rd_wr", 1},      // [37]
++    {"last", 1},       // [36]
++    {"srcaccid", 10},  // [35:26]
++    {"dstaccid", 10},  // [25:16]
++    {"spares", 16},    // [15:0]
++}}};
++
++// Table 5-31: Compressed Request Field (64 bits)
++inline constexpr bit_fields::PacketFormat<12> kCompressedRequestFieldFormat{{{
++    {"ftype", 4},      // [63:60] = 0x3
++    {"cmd", 3},        // [59:57]
++    {"vchan", 2},      // [56:55]
++    {"asi", 2},        // [54:53]
++    {"tag", 11},       // [52:42]
++    {"pool", 1},       // [41]
++    {"len", 2},        // [40:39]
++    {"metadata", 3},   // [38:36]
++    {"addr", 14},      // [35:22]
++    {"srcaccid", 10},  // [21:12]
++    {"dstaccid", 10},  // [11:2]
++    {"cway", 2},       // [1:0]
++}}};
++
++// Table 5-34: Compressed Response Single Beat Read (32 bits)
++inline constexpr bit_fields::PacketFormat<8> kCompressedResponseSingleBeatReadFormat{{{
++    {"ftype", 4},      // [31:28] = 0x4
++    {"vchan", 2},      // [27:26]
++    {"tag", 11},       // [25:15]
++    {"pool", 1},       // [14]
++    {"dstaccid", 10},  // [13:4]
++    {"offset", 2},     // [3:2]
++    {"last", 1},       // [1]
++    {"spare", 1},      // [0]
++}}};
++
++// Table 5-36: Compressed Response Write or Multi-Beat Read (32 bits)
++inline constexpr bit_fields::PacketFormat<8> kCompressedResponseWriteOrMultiBeatReadFormat{{{
++    {"ftype", 4},      // [31:28] = 0x5
++    {"vchan", 2},      // [27:26]
++    {"tag", 11},       // [25:15]
++    {"pool", 1},       // [14]
++    {"dstaccid", 10},  // [13:4]
++    {"len", 2},        // [3:2]
++    {"rd_wr", 1},      // [1]
++    {"spare", 1},      // [0]
++}}};
++
++// Table 5-38: Flow Control / NOP Field (32 bits)
++inline constexpr bit_fields::PacketFormat<5> kFlowControlNopFieldFormat{{{
++    {"ftype", 4},    // [31:28] = 0x0
++    {"req_cmd", 6},  // [27:22]
++    {"rsp_cmd", 6},  // [21:16]
++    {"req_data", 8}, // [15:8]
++    {"rsp_data", 8}, // [7:0]
++}}};
++
++struct UncompressedRequestField {
++  std::uint8_t cmd{0};
++  std::uint8_t vchan{0};
++  std::uint8_t asi{0};
++  std::uint16_t tag{0};
++  bool pool{false};
++  std::uint8_t attr{0};
++  std::uint8_t len{0};
++  std::uint8_t metadata{0};
++  std::uint64_t addr{0}; // 55 bits
++  std::uint16_t srcaccid{0};
++  std::uint16_t dstaccid{0};
++  bool cload{false};
++  std::uint8_t cway{0};
++  std::uint8_t numbeats{0};
++};
++
++struct UncompressedResponseField {
++  std::uint8_t vchan{0};
++  std::uint16_t tag{0};
++  bool pool{false};
++  std::uint8_t len{0};
++  std::uint8_t offset{0};
++  std::uint8_t status{0};
++  bool rd_wr{false};
++  bool last{false};
++  std::uint16_t srcaccid{0};
++  std::uint16_t dstaccid{0};
++  std::uint16_t spares{0};
++};
++
++struct CompressedRequestField {
++  std::uint8_t cmd{0};
++  std::uint8_t vchan{0};
++  std::uint8_t asi{0};
++  std::uint16_t tag{0};
++  bool pool{false};
++  std::uint8_t len{0};
++  std::uint8_t metadata{0};
++  std::uint16_t addr{0}; // 14 bits
++  std::uint16_t srcaccid{0};
++  std::uint16_t dstaccid{0};
++  std::uint8_t cway{0};
++};
++
++struct CompressedResponseSingleBeatReadField {
++  std::uint8_t vchan{0};
++  std::uint16_t tag{0};
++  bool pool{false};
++  std::uint16_t dstaccid{0};
++  std::uint8_t offset{0};
++  bool last{false};
++};
++
++struct CompressedResponseWriteOrMultiBeatReadField {
++  std::uint8_t vchan{0};
++  std::uint16_t tag{0};
++  bool pool{false};
++  std::uint16_t dstaccid{0};
++  std::uint8_t len{0};
++  bool rd_wr{false};
++};
++
++struct FlowControlNopField {
++  std::uint8_t req_cmd{0};
++  std::uint8_t rsp_cmd{0};
++  std::uint8_t req_data{0};
++  std::uint8_t rsp_data{0};
++};
++
++[[nodiscard]] std::array<std::byte, 16> serialize_uncompressed_request_field(const UncompressedRequestField& f);
++[[nodiscard]] std::optional<UncompressedRequestField> deserialize_uncompressed_request_field(
++    std::span<const std::byte, 16> bytes);
++
++[[nodiscard]] std::array<std::byte, 8> serialize_uncompressed_response_field(const UncompressedResponseField& f);
++[[nodiscard]] std::optional<UncompressedResponseField> deserialize_uncompressed_response_field(
++    std::span<const std::byte, 8> bytes);
++
++[[nodiscard]] std::array<std::byte, 8> serialize_compressed_request_field(const CompressedRequestField& f);
++[[nodiscard]] std::optional<CompressedRequestField> deserialize_compressed_request_field(
++    std::span<const std::byte, 8> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_compressed_response_single_beat_read_field(
++    const CompressedResponseSingleBeatReadField& f);
++[[nodiscard]] std::optional<CompressedResponseSingleBeatReadField> deserialize_compressed_response_single_beat_read_field(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_compressed_response_write_or_multi_beat_read_field(
++    const CompressedResponseWriteOrMultiBeatReadField& f);
++[[nodiscard]] std::optional<CompressedResponseWriteOrMultiBeatReadField> deserialize_compressed_response_write_or_multi_beat_read_field(
++    std::span<const std::byte, 4> bytes);
++
++[[nodiscard]] std::array<std::byte, 4> serialize_flow_control_nop_field(const FlowControlNopField& f);
++[[nodiscard]] std::optional<FlowControlNopField> deserialize_flow_control_nop_field(
++    std::span<const std::byte, 4> bytes);
++
++}  // namespace ualink::tl
+diff --git a/src/dl_messages.cpp b/src/dl_messages.cpp
+new file mode 100644
+index 0000000..1276a65
+--- /dev/null
++++ b/src/dl_messages.cpp
+@@ -0,0 +1,351 @@
++#include "ualink/dl_messages.h"
++
++#include <algorithm>
++#include <stdexcept>
++
++using namespace ualink::dl;
++
++static constexpr bool fits_in_bits(std::uint64_t value, std::uint8_t bits) {
++  if (bits >= 64) {
++    return true;
++  }
++  return value <= ((1ULL << bits) - 1ULL);
++}
++
++static void store_be32(std::span<std::byte, 4> out, std::uint32_t value) {
++  out[0] = std::byte{static_cast<unsigned char>((value >> 24) & 0xFFU)};
++  out[1] = std::byte{static_cast<unsigned char>((value >> 16) & 0xFFU)};
++  out[2] = std::byte{static_cast<unsigned char>((value >> 8) & 0xFFU)};
++  out[3] = std::byte{static_cast<unsigned char>(value & 0xFFU)};
++}
++
++static std::uint32_t load_be32(std::span<const std::byte, 4> in) {
++  const auto b0 = static_cast<std::uint32_t>(std::to_integer<unsigned char>(in[0]));
++  const auto b1 = static_cast<std::uint32_t>(std::to_integer<unsigned char>(in[1]));
++  const auto b2 = static_cast<std::uint32_t>(std::to_integer<unsigned char>(in[2]));
++  const auto b3 = static_cast<std::uint32_t>(std::to_integer<unsigned char>(in[3]));
++  return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_uart_stream_reset_request(const UartStreamResetRequest& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (msg.stream_id > 0x7) {
++    throw std::invalid_argument("serialize_uart_stream_reset_request: stream_id out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_uart_stream_reset_request: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kUartStreamResetRequestFormat,
++                   0U,
++                   msg.all_streams ? 1U : 0U,
++                   msg.stream_id,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<UartStreamResetRequest> ualink::dl::deserialize_uart_stream_reset_request(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  UartStreamResetRequest out{};
++  std::uint32_t reserved_hi = 0;
++  std::uint8_t all_streams = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  reader.deserialize_into(kUartStreamResetRequestFormat,
++                          reserved_hi,
++                          all_streams,
++                          out.stream_id,
++                          out.common.mtype,
++                          out.common.mclass,
++                          reserved,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  out.all_streams = (all_streams != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_uart_stream_reset_response(const UartStreamResetResponse& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (msg.status > 0x7) {
++    throw std::invalid_argument("serialize_uart_stream_reset_response: status out of range");
++  }
++  if (msg.stream_id > 0x7) {
++    throw std::invalid_argument("serialize_uart_stream_reset_response: stream_id out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_uart_stream_reset_response: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kUartStreamResetResponseFormat,
++                   0U,
++                   msg.status,
++                   msg.all_streams ? 1U : 0U,
++                   msg.stream_id,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<UartStreamResetResponse> ualink::dl::deserialize_uart_stream_reset_response(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  UartStreamResetResponse out{};
++  std::uint32_t reserved_hi = 0;
++  std::uint8_t all_streams = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  reader.deserialize_into(kUartStreamResetResponseFormat,
++                          reserved_hi,
++                          out.status,
++                          all_streams,
++                          out.stream_id,
++                          out.common.mtype,
++                          out.common.mclass,
++                          reserved,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  out.all_streams = (all_streams != 0);
++  return out;
++}
++
++std::vector<std::byte> ualink::dl::serialize_uart_stream_transport_message(const UartStreamTransportMessage& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (msg.stream_id > 0x7) {
++    throw std::invalid_argument("serialize_uart_stream_transport_message: stream_id out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_uart_stream_transport_message: mtype/mclass out of range");
++  }
++  if (msg.payload_dwords.empty()) {
++    throw std::invalid_argument("serialize_uart_stream_transport_message: payload must be >= 1 dword");
++  }
++  // length is 5 bits => payload count 1..32 in this helper
++  if (msg.payload_dwords.size() > 32) {
++    throw std::invalid_argument("serialize_uart_stream_transport_message: payload too large");
++  }
++  const std::uint8_t length_field = static_cast<std::uint8_t>(msg.payload_dwords.size() - 1U);
++
++  std::vector<std::byte> buffer((1U + msg.payload_dwords.size()) * 4U);
++
++  // Header DW0
++  {
++    std::array<std::byte, 4> header{};
++    bit_fields::NetworkBitWriter writer(header);
++    writer.serialize(kUartStreamTransportHeaderFormat,
++                     length_field,
++                     0U,
++                     msg.stream_id,
++                     msg.common.mtype,
++                     msg.common.mclass,
++                     0U,
++                     0U);
++    std::copy(header.begin(), header.end(), buffer.begin());
++  }
++
++  // Payload DWs (big endian)
++  for (std::size_t i = 0; i < msg.payload_dwords.size(); ++i) {
++    const std::size_t offset = (1U + i) * 4U;
++    std::array<std::byte, 4> dw{};
++    store_be32(dw, msg.payload_dwords[i]);
++    std::copy(dw.begin(), dw.end(), buffer.begin() + offset);
++  }
++
++  return buffer;
++}
++
++std::optional<UartStreamTransportMessage> ualink::dl::deserialize_uart_stream_transport_message(
++    std::span<const std::byte> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (bytes.size() < 8 || (bytes.size() % 4) != 0) {
++    return std::nullopt;
++  }
++
++  UartStreamTransportMessage out{};
++  std::uint8_t length_field = 0;
++  std::uint32_t reserved_hi = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  {
++    bit_fields::NetworkBitReader reader(bytes.subspan(0, 4));
++    reader.deserialize_into(kUartStreamTransportHeaderFormat,
++                            length_field,
++                            reserved_hi,
++                            out.stream_id,
++                            out.common.mtype,
++                            out.common.mclass,
++                            reserved,
++                            compressed);
++  }
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  const std::size_t payload_dw_count = static_cast<std::size_t>(length_field) + 1U;
++  const std::size_t expected_bytes = (1U + payload_dw_count) * 4U;
++  if (bytes.size() < expected_bytes) {
++    return std::nullopt;
++  }
++
++  out.payload_dwords.resize(payload_dw_count);
++  for (std::size_t i = 0; i < payload_dw_count; ++i) {
++    const std::size_t offset = (1U + i) * 4U;
++    std::array<std::byte, 4> dw{};
++    std::copy_n(bytes.begin() + offset, 4, dw.begin());
++    out.payload_dwords[i] = load_be32(dw);
++  }
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_uart_stream_credit_update(const UartStreamCreditUpdate& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(msg.data_fc_seq, 12)) {
++    throw std::invalid_argument("serialize_uart_stream_credit_update: data_fc_seq out of range");
++  }
++  if (msg.stream_id > 0x7) {
++    throw std::invalid_argument("serialize_uart_stream_credit_update: stream_id out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_uart_stream_credit_update: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kUartStreamCreditUpdateFormat,
++                   msg.data_fc_seq,
++                   0U,
++                   msg.stream_id,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<UartStreamCreditUpdate> ualink::dl::deserialize_uart_stream_credit_update(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  UartStreamCreditUpdate out{};
++  std::uint32_t reserved_hi = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  reader.deserialize_into(kUartStreamCreditUpdateFormat,
++                          out.data_fc_seq,
++                          reserved_hi,
++                          out.stream_id,
++                          out.common.mtype,
++                          out.common.mclass,
++                          reserved,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_tl_rate_notification(const TlRateNotification& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_tl_rate_notification: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kTlRateNotificationFormat,
++                   msg.rate,
++                   0U,
++                   msg.ack ? 1U : 0U,
++                   0U,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<TlRateNotification> ualink::dl::deserialize_tl_rate_notification(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  TlRateNotification out{};
++  std::uint8_t reserved_hi = 0;
++  std::uint8_t ack = 0;
++  std::uint8_t reserved_mid = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  reader.deserialize_into(kTlRateNotificationFormat,
++                          out.rate,
++                          reserved_hi,
++                          ack,
++                          reserved_mid,
++                          out.common.mtype,
++                          out.common.mclass,
++                          reserved,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  out.ack = (ack != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_device_id_message(const DeviceIdMessage& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(msg.id, 10)) {
++    throw std::invalid_argument("serialize_device_id_message: id out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_device_id_message: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kDeviceIdFormat,
++                   msg.valid ? 1U : 0U,
++                   static_cast<std::uint8_t>(msg.type),
++                   0U,
++                   msg.id,
++                   0U,
++                   msg.ack ? 1U : 0U,
++                   0U,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<DeviceIdMessage> ualink::dl::deserialize_device_id_message(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  DeviceIdMessage out{};
++  std::uint8_t valid = 0;
++  std::uint8_t type = 0;
++  std::uint8_t ack = 0;
++  std::uint8_t compressed = 0;
++  std::uint8_t r0 = 0, r1 = 0, r2 = 0, r3 = 0;
++  reader.deserialize_into(kDeviceIdFormat,
++                          valid,
++                          type,
++                          r0,
++                          out.id,
++                          r1,
++                          ack,
++                          r2,
++                          out.common.mtype,
++                          out.common.mclass,
++                          r3,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  out.valid = (valid != 0);
++  out.ack = (ack != 0);
++  out.type = static_cast<DeviceType>(type & 0x3U);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_port_id_message(const PortIdMessage& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  // Spec text says 10-bit; encoded field spans [27:16]. Keep validation at 10-bit.
++  if (msg.port_number > 0x3FF) {
++    throw std::invalid_argument("serialize_port_id_message: port_number out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_port_id_message: mtype/mclass out of range");
++  }
++
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kPortIdFormat,
++                   msg.valid ? 1U : 0U,
++                   0U,
++                   msg.port_number,
++                   0U,
++                   msg.ack ? 1U : 0U,
++                   0U,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<PortIdMessage> ualink::dl::deserialize_port_id_message(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  PortIdMessage out{};
++  std::uint8_t valid = 0;
++  std::uint8_t ack = 0;
++  std::uint8_t compressed = 0;
++  std::uint8_t r0 = 0, r1 = 0, r2 = 0, r3 = 0;
++  reader.deserialize_into(kPortIdFormat,
++                          valid,
++                          r0,
++                          out.port_number,
++                          r1,
++                          ack,
++                          r2,
++                          out.common.mtype,
++                          out.common.mclass,
++                          r3,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  out.valid = (valid != 0);
++  out.ack = (ack != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_no_op_message(const NoOpMessage& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_no_op_message: mtype/mclass out of range");
++  }
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kNoOpMessageFormat,
++                   0U,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<NoOpMessage> ualink::dl::deserialize_no_op_message(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  NoOpMessage out{};
++  std::uint32_t reserved_hi = 0;
++  std::uint8_t reserved = 0;
++  std::uint8_t compressed = 0;
++  reader.deserialize_into(kNoOpMessageFormat,
++                          reserved_hi,
++                          out.common.mtype,
++                          out.common.mclass,
++                          reserved,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_channel_negotiation(const ChannelNegotiation& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(msg.channel_response, 4) ||
++      !fits_in_bits(msg.channel_command, 4) ||
++      !fits_in_bits(msg.channel_target, 4)) {
++    throw std::invalid_argument("serialize_channel_negotiation: channel fields out of range");
++  }
++  if (!fits_in_bits(msg.common.mtype, 3) || !fits_in_bits(msg.common.mclass, 4)) {
++    throw std::invalid_argument("serialize_channel_negotiation: mtype/mclass out of range");
++  }
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kChannelNegotiationFormat,
++                   0U,
++                   msg.channel_response,
++                   msg.channel_command,
++                   msg.channel_target,
++                   0U,
++                   msg.common.mtype,
++                   msg.common.mclass,
++                   0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<ChannelNegotiation> ualink::dl::deserialize_channel_negotiation(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  ChannelNegotiation out{};
++  std::uint8_t compressed = 0;
++  std::uint32_t r0 = 0;
++  std::uint8_t r1 = 0, r2 = 0;
++  reader.deserialize_into(kChannelNegotiationFormat,
++                          r0,
++                          out.channel_response,
++                          out.channel_command,
++                          out.channel_target,
++                          r1,
++                          out.common.mtype,
++                          out.common.mclass,
++                          r2,
++                          compressed);
++  if (compressed != 0) {
++    return std::nullopt;
++  }
++  return out;
++}
++
++std::array<std::byte, 4> ualink::dl::serialize_vendor_defined_tl_dword(const VendorDefinedTlDword& msg) {
++  UALINK_TRACE_SCOPED(__func__);
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kVendorDefinedTlDwordFormat,
++                   msg.vendor_id,
++                   msg.type,
++                   msg.length);
++  return buffer;
++}
++
++VendorDefinedTlDword ualink::dl::deserialize_vendor_defined_tl_dword(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  VendorDefinedTlDword out{};
++  reader.deserialize_into(kVendorDefinedTlDwordFormat,
++                          out.vendor_id,
++                          out.type,
++                          out.length);
++  return out;
++}
+diff --git a/src/security_iv.cpp b/src/security_iv.cpp
+new file mode 100644
+index 0000000..b8c2e4c
+--- /dev/null
++++ b/src/security_iv.cpp
+@@ -0,0 +1,34 @@
++#include "ualink/security_iv.h"
++
++using namespace ualink::security;
++
++std::array<std::byte, 12> ualink::security::serialize_iv96(const Iv96& iv) {
++  UALINK_TRACE_SCOPED(__func__);
++  std::array<std::byte, 12> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kIvFormat,
++                   0ULL,         // fixed field [95:32]
++                   iv.invocation // invocation [31:0]
++  );
++  return buffer;
++}
++
++std::optional<Iv96> ualink::security::deserialize_iv96(std::span<const std::byte, 12> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  Iv96 out{};
++  std::uint64_t fixed = 0;
++  reader.deserialize_into(kIvFormat, fixed, out.invocation);
++  if (fixed != 0ULL) {
++    return std::nullopt;
++  }
++  return out;
++}
+diff --git a/src/tl_fields.cpp b/src/tl_fields.cpp
+new file mode 100644
+index 0000000..a0f0238
+--- /dev/null
++++ b/src/tl_fields.cpp
+@@ -0,0 +1,287 @@
++#include "ualink/tl_fields.h"
++
++#include <stdexcept>
++
++using namespace ualink::tl;
++
++static constexpr bool fits_in_bits(std::uint64_t value, std::uint8_t bits) {
++  if (bits >= 64) {
++    return true;
++  }
++  return value <= ((1ULL << bits) - 1ULL);
++}
++
++std::array<std::byte, 16> ualink::tl::serialize_uncompressed_request_field(const UncompressedRequestField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.cmd, 6) || !fits_in_bits(f.vchan, 2) || !fits_in_bits(f.asi, 2) ||
++      !fits_in_bits(f.tag, 11) || !fits_in_bits(f.attr, 8) || !fits_in_bits(f.len, 6) ||
++      !fits_in_bits(f.metadata, 8) || !fits_in_bits(f.addr, 55) || !fits_in_bits(f.srcaccid, 10) ||
++      !fits_in_bits(f.dstaccid, 10) || !fits_in_bits(f.cway, 2) || !fits_in_bits(f.numbeats, 2)) {
++    throw std::invalid_argument("serialize_uncompressed_request_field: field out of range");
++  }
++
++  std::array<std::byte, 16> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kUncompressedRequestFieldFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kUncompressedRequest),
++                   f.cmd,
++                   f.vchan,
++                   f.asi,
++                   f.tag,
++                   f.pool ? 1U : 0U,
++                   f.attr,
++                   f.len,
++                   f.metadata,
++                   f.addr,
++                   f.srcaccid,
++                   f.dstaccid,
++                   f.cload ? 1U : 0U,
++                   f.cway,
++                   f.numbeats);
++  return buffer;
++}
++
++std::optional<UncompressedRequestField> ualink::tl::deserialize_uncompressed_request_field(
++    std::span<const std::byte, 16> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  UncompressedRequestField out{};
++  std::uint8_t ftype = 0;
++  std::uint8_t pool = 0;
++  std::uint8_t cload = 0;
++  reader.deserialize_into(kUncompressedRequestFieldFormat,
++                          ftype,
++                          out.cmd,
++                          out.vchan,
++                          out.asi,
++                          out.tag,
++                          pool,
++                          out.attr,
++                          out.len,
++                          out.metadata,
++                          out.addr,
++                          out.srcaccid,
++                          out.dstaccid,
++                          cload,
++                          out.cway,
++                          out.numbeats);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kUncompressedRequest)) {
++    return std::nullopt;
++  }
++  out.pool = (pool != 0);
++  out.cload = (cload != 0);
++  return out;
++}
++
++std::array<std::byte, 8> ualink::tl::serialize_uncompressed_response_field(const UncompressedResponseField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.vchan, 2) || !fits_in_bits(f.tag, 11) || !fits_in_bits(f.len, 2) ||
++      !fits_in_bits(f.offset, 2) || !fits_in_bits(f.status, 4) || !fits_in_bits(f.srcaccid, 10) ||
++      !fits_in_bits(f.dstaccid, 10) || !fits_in_bits(f.spares, 16)) {
++    throw std::invalid_argument("serialize_uncompressed_response_field: field out of range");
++  }
++
++  std::array<std::byte, 8> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kUncompressedResponseFieldFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kUncompressedResponse),
++                   f.vchan,
++                   f.tag,
++                   f.pool ? 1U : 0U,
++                   f.len,
++                   f.offset,
++                   f.status,
++                   f.rd_wr ? 1U : 0U,
++                   f.last ? 1U : 0U,
++                   f.srcaccid,
++                   f.dstaccid,
++                   f.spares);
++  return buffer;
++}
++
++std::optional<UncompressedResponseField> ualink::tl::deserialize_uncompressed_response_field(
++    std::span<const std::byte, 8> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  UncompressedResponseField out{};
++  std::uint8_t ftype = 0;
++  std::uint8_t pool = 0;
++  std::uint8_t rd_wr = 0;
++  std::uint8_t last = 0;
++  reader.deserialize_into(kUncompressedResponseFieldFormat,
++                          ftype,
++                          out.vchan,
++                          out.tag,
++                          pool,
++                          out.len,
++                          out.offset,
++                          out.status,
++                          rd_wr,
++                          last,
++                          out.srcaccid,
++                          out.dstaccid,
++                          out.spares);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kUncompressedResponse)) {
++    return std::nullopt;
++  }
++  out.pool = (pool != 0);
++  out.rd_wr = (rd_wr != 0);
++  out.last = (last != 0);
++  return out;
++}
++
++std::array<std::byte, 8> ualink::tl::serialize_compressed_request_field(const CompressedRequestField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.cmd, 3) || !fits_in_bits(f.vchan, 2) || !fits_in_bits(f.asi, 2) ||
++      !fits_in_bits(f.tag, 11) || !fits_in_bits(f.len, 2) || !fits_in_bits(f.metadata, 3) ||
++      !fits_in_bits(f.addr, 14) || !fits_in_bits(f.srcaccid, 10) || !fits_in_bits(f.dstaccid, 10) ||
++      !fits_in_bits(f.cway, 2)) {
++    throw std::invalid_argument("serialize_compressed_request_field: field out of range");
++  }
++  std::array<std::byte, 8> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kCompressedRequestFieldFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kCompressedRequest),
++                   f.cmd,
++                   f.vchan,
++                   f.asi,
++                   f.tag,
++                   f.pool ? 1U : 0U,
++                   f.len,
++                   f.metadata,
++                   f.addr,
++                   f.srcaccid,
++                   f.dstaccid,
++                   f.cway);
++  return buffer;
++}
++
++std::optional<CompressedRequestField> ualink::tl::deserialize_compressed_request_field(
++    std::span<const std::byte, 8> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  CompressedRequestField out{};
++  std::uint8_t ftype = 0;
++  std::uint8_t pool = 0;
++  reader.deserialize_into(kCompressedRequestFieldFormat,
++                          ftype,
++                          out.cmd,
++                          out.vchan,
++                          out.asi,
++                          out.tag,
++                          pool,
++                          out.len,
++                          out.metadata,
++                          out.addr,
++                          out.srcaccid,
++                          out.dstaccid,
++                          out.cway);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kCompressedRequest)) {
++    return std::nullopt;
++  }
++  out.pool = (pool != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::tl::serialize_compressed_response_single_beat_read_field(
++    const CompressedResponseSingleBeatReadField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.vchan, 2) || !fits_in_bits(f.tag, 11) || !fits_in_bits(f.dstaccid, 10) ||
++      !fits_in_bits(f.offset, 2)) {
++    throw std::invalid_argument("serialize_compressed_response_single_beat_read_field: field out of range");
++  }
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kCompressedResponseSingleBeatReadFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kCompressedResponseSingleBeatRead),
++                   f.vchan,
++                   f.tag,
++                   f.pool ? 1U : 0U,
++                   f.dstaccid,
++                   f.offset,
++                   f.last ? 1U : 0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<CompressedResponseSingleBeatReadField> ualink::tl::deserialize_compressed_response_single_beat_read_field(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  CompressedResponseSingleBeatReadField out{};
++  std::uint8_t ftype = 0;
++  std::uint8_t pool = 0;
++  std::uint8_t last = 0;
++  std::uint8_t spare = 0;
++  reader.deserialize_into(kCompressedResponseSingleBeatReadFormat,
++                          ftype,
++                          out.vchan,
++                          out.tag,
++                          pool,
++                          out.dstaccid,
++                          out.offset,
++                          last,
++                          spare);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kCompressedResponseSingleBeatRead)) {
++    return std::nullopt;
++  }
++  out.pool = (pool != 0);
++  out.last = (last != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::tl::serialize_compressed_response_write_or_multi_beat_read_field(
++    const CompressedResponseWriteOrMultiBeatReadField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.vchan, 2) || !fits_in_bits(f.tag, 11) || !fits_in_bits(f.dstaccid, 10) ||
++      !fits_in_bits(f.len, 2)) {
++    throw std::invalid_argument("serialize_compressed_response_write_or_multi_beat_read_field: field out of range");
++  }
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kCompressedResponseWriteOrMultiBeatReadFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kCompressedResponseWriteOrMultiBeatRead),
++                   f.vchan,
++                   f.tag,
++                   f.pool ? 1U : 0U,
++                   f.dstaccid,
++                   f.len,
++                   f.rd_wr ? 1U : 0U,
++                   0U);
++  return buffer;
++}
++
++std::optional<CompressedResponseWriteOrMultiBeatReadField> ualink::tl::deserialize_compressed_response_write_or_multi_beat_read_field(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  CompressedResponseWriteOrMultiBeatReadField out{};
++  std::uint8_t ftype = 0;
++  std::uint8_t pool = 0;
++  std::uint8_t rd_wr = 0;
++  std::uint8_t spare = 0;
++  reader.deserialize_into(kCompressedResponseWriteOrMultiBeatReadFormat,
++                          ftype,
++                          out.vchan,
++                          out.tag,
++                          pool,
++                          out.dstaccid,
++                          out.len,
++                          rd_wr,
++                          spare);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kCompressedResponseWriteOrMultiBeatRead)) {
++    return std::nullopt;
++  }
++  out.pool = (pool != 0);
++  out.rd_wr = (rd_wr != 0);
++  return out;
++}
++
++std::array<std::byte, 4> ualink::tl::serialize_flow_control_nop_field(const FlowControlNopField& f) {
++  UALINK_TRACE_SCOPED(__func__);
++  if (!fits_in_bits(f.req_cmd, 6) || !fits_in_bits(f.rsp_cmd, 6) || !fits_in_bits(f.req_data, 8) ||
++      !fits_in_bits(f.rsp_data, 8)) {
++    throw std::invalid_argument("serialize_flow_control_nop_field: field out of range");
++  }
++  std::array<std::byte, 4> buffer{};
++  bit_fields::NetworkBitWriter writer(buffer);
++  writer.serialize(kFlowControlNopFieldFormat,
++                   static_cast<std::uint8_t>(TlFieldType::kFlowControlNop),
++                   f.req_cmd,
++                   f.rsp_cmd,
++                   f.req_data,
++                   f.rsp_data);
++  return buffer;
++}
++
++std::optional<FlowControlNopField> ualink::tl::deserialize_flow_control_nop_field(
++    std::span<const std::byte, 4> bytes) {
++  UALINK_TRACE_SCOPED(__func__);
++  bit_fields::NetworkBitReader reader(bytes);
++  FlowControlNopField out{};
++  std::uint8_t ftype = 0;
++  reader.deserialize_into(kFlowControlNopFieldFormat,
++                          ftype,
++                          out.req_cmd,
++                          out.rsp_cmd,
++                          out.req_data,
++                          out.rsp_data);
++  if (ftype != static_cast<std::uint8_t>(TlFieldType::kFlowControlNop)) {
++    return std::nullopt;
++  }
++  return out;
++}
+diff --git a/tests/dl_messages_test.cpp b/tests/dl_messages_test.cpp
+new file mode 100644
+index 0000000..d16cb98
+--- /dev/null
++++ b/tests/dl_messages_test.cpp
+@@ -0,0 +1,209 @@
++#include "ualink/dl_messages.h"
++
++#include <cassert>
++#include <cstddef>
++#include <iostream>
++
++using namespace ualink::dl;
++
++static void test_uart_stream_reset_request() {
++  std::cout << "test_uart_stream_reset_request: ";
++  UartStreamResetRequest msg{};
++  msg.all_streams = true;
++  msg.stream_id = 0;
++  msg.common.mtype = 0x3;
++  msg.common.mclass = 0xA;
++
++  const auto bytes = serialize_uart_stream_reset_request(msg);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kUartStreamResetRequestFormat);
++  const bit_fields::ExpectedTable<5> expected{{
++      {"all_streams", 1U},
++      {"stream_id", 0U},
++      {"mtype", 0x3U},
++      {"mclass", 0xAU},
++      {"compressed", 0U},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_uart_stream_reset_request(bytes);
++  assert(decoded.has_value());
++  assert(decoded->all_streams == msg.all_streams);
++  assert(decoded->stream_id == msg.stream_id);
++  assert(decoded->common.mtype == msg.common.mtype);
++  assert(decoded->common.mclass == msg.common.mclass);
++  std::cout << "PASS\n";
++}
++
++static void test_tl_rate_notification() {
++  std::cout << "test_tl_rate_notification: ";
++  TlRateNotification msg{};
++  msg.rate = 0x1234;
++  msg.ack = false;
++  msg.common.mtype = 0x1;
++  msg.common.mclass = 0x2;
++
++  const auto bytes = serialize_tl_rate_notification(msg);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kTlRateNotificationFormat);
++  const bit_fields::ExpectedTable<6> expected{{
++      {"rate", 0x1234U},
++      {"ack", 0U},
++      {"mtype", 0x1U},
++      {"mclass", 0x2U},
++      {"_reserved", 0U},
++      {"compressed", 0U},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_tl_rate_notification(bytes);
++  assert(decoded.has_value());
++  assert(decoded->rate == msg.rate);
++  assert(decoded->ack == msg.ack);
++  assert(decoded->common.mtype == msg.common.mtype);
++  assert(decoded->common.mclass == msg.common.mclass);
++  std::cout << "PASS\n";
++}
++
++static void test_uart_stream_transport_message_roundtrip() {
++  std::cout << "test_uart_stream_transport_message_roundtrip: ";
++  UartStreamTransportMessage msg{};
++  msg.stream_id = 0;
++  msg.common.mtype = 0x7;
++  msg.common.mclass = 0x1;
++  msg.payload_dwords = {0x11223344U, 0xAABBCCDDU};
++
++  const auto bytes = serialize_uart_stream_transport_message(msg);
++  assert(bytes.size() == 12);
++
++  // Verify header DW0
++  {
++    std::array<std::byte, 4> header{};
++    std::copy_n(bytes.begin(), 4, header.begin());
++    bit_fields::NetworkBitReader reader(header);
++    const auto parsed = reader.deserialize(kUartStreamTransportHeaderFormat);
++    const bit_fields::ExpectedTable<5> expected{{
++        {"length", 1U}, // payload 2 dwords => length=1
++        {"stream_id", 0U},
++        {"mtype", 0x7U},
++        {"mclass", 0x1U},
++        {"compressed", 0U},
++    }};
++    reader.assert_expected(parsed, expected);
++  }
++
++  const auto decoded = deserialize_uart_stream_transport_message(bytes);
++  assert(decoded.has_value());
++  assert(decoded->stream_id == msg.stream_id);
++  assert(decoded->common.mtype == msg.common.mtype);
++  assert(decoded->common.mclass == msg.common.mclass);
++  assert(decoded->payload_dwords == msg.payload_dwords);
++  std::cout << "PASS\n";
++}
++
++static void test_vendor_defined_tl_dword() {
++  std::cout << "test_vendor_defined_tl_dword: ";
++  VendorDefinedTlDword msg{};
++  msg.vendor_id = 0xFFFF;
++  msg.type = 0x12;
++  msg.length = 0x00;
++
++  const auto bytes = serialize_vendor_defined_tl_dword(msg);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kVendorDefinedTlDwordFormat);
++  const bit_fields::ExpectedTable<3> expected{{
++      {"vendor_id", 0xFFFFU},
++      {"type", 0x12U},
++      {"length", 0x00U},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_vendor_defined_tl_dword(bytes);
++  assert(decoded.vendor_id == msg.vendor_id);
++  assert(decoded.type == msg.type);
++  assert(decoded.length == msg.length);
++  std::cout << "PASS\n";
++}
++
++int main() {
++  test_uart_stream_reset_request();
++  test_tl_rate_notification();
++  test_uart_stream_transport_message_roundtrip();
++  test_vendor_defined_tl_dword();
++  return 0;
++}
+diff --git a/tests/security_iv_test.cpp b/tests/security_iv_test.cpp
+new file mode 100644
+index 0000000..c4b8a97
+--- /dev/null
++++ b/tests/security_iv_test.cpp
+@@ -0,0 +1,44 @@
++#include "ualink/security_iv.h"
++
++#include <cassert>
++#include <iostream>
++
++using namespace ualink::security;
++
++static void test_iv96_round_trip() {
++  std::cout << "test_iv96_round_trip: ";
++
++  Iv96 original{};
++  original.invocation = 0xDEADBEEFU;
++
++  const auto bytes = serialize_iv96(original);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kIvFormat);
++  const bit_fields::ExpectedTable<2> expected{{
++      {"fixed", 0ULL},
++      {"invocation", 0xDEADBEEFU},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_iv96(bytes);
++  assert(decoded.has_value());
++  assert(decoded->invocation == original.invocation);
++  std::cout << "PASS\n";
++}
++
++int main() {
++  test_iv96_round_trip();
++  return 0;
++}
+diff --git a/tests/tl_fields_test.cpp b/tests/tl_fields_test.cpp
+new file mode 100644
+index 0000000..0cb20c3
+--- /dev/null
++++ b/tests/tl_fields_test.cpp
+@@ -0,0 +1,179 @@
++#include "ualink/tl_fields.h"
++
++#include <cassert>
++#include <iostream>
++
++using namespace ualink::tl;
++
++static void test_uncompressed_request_field() {
++  std::cout << "test_uncompressed_request_field: ";
++  UncompressedRequestField f{};
++  f.cmd = 0x2A;
++  f.vchan = 1;
++  f.asi = 2;
++  f.tag = 0x5AA;
++  f.pool = true;
++  f.attr = 0xAB;
++  f.len = 0x12;
++  f.metadata = 0xCD;
++  f.addr = 0x123456789ABULL & ((1ULL << 55) - 1ULL);
++  f.srcaccid = 0x155;
++  f.dstaccid = 0x2AA;
++  f.cload = true;
++  f.cway = 3;
++  f.numbeats = 2;
++
++  const auto bytes = serialize_uncompressed_request_field(f);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kUncompressedRequestFieldFormat);
++  const bit_fields::ExpectedTable<8> expected{{
++      {"ftype", static_cast<std::uint8_t>(TlFieldType::kUncompressedRequest)},
++      {"cmd", f.cmd},
++      {"tag", f.tag},
++      {"pool", 1U},
++      {"addr", f.addr},
++      {"cload", 1U},
++      {"cway", f.cway},
++      {"numbeats", f.numbeats},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_uncompressed_request_field(bytes);
++  assert(decoded.has_value());
++  assert(decoded->cmd == f.cmd);
++  assert(decoded->vchan == f.vchan);
++  assert(decoded->asi == f.asi);
++  assert(decoded->tag == f.tag);
++  assert(decoded->pool == f.pool);
++  assert(decoded->attr == f.attr);
++  assert(decoded->len == f.len);
++  assert(decoded->metadata == f.metadata);
++  assert(decoded->addr == f.addr);
++  assert(decoded->srcaccid == f.srcaccid);
++  assert(decoded->dstaccid == f.dstaccid);
++  assert(decoded->cload == f.cload);
++  assert(decoded->cway == f.cway);
++  assert(decoded->numbeats == f.numbeats);
++  std::cout << "PASS\n";
++}
++
++static void test_flow_control_nop_field() {
++  std::cout << "test_flow_control_nop_field: ";
++  FlowControlNopField f{};
++  f.req_cmd = 0x15;
++  f.rsp_cmd = 0x2A;
++  f.req_data = 0xC3;
++  f.rsp_data = 0x3C;
++
++  const auto bytes = serialize_flow_control_nop_field(f);
++  bit_fields::NetworkBitReader reader(bytes);
++  const auto parsed = reader.deserialize(kFlowControlNopFieldFormat);
++  const bit_fields::ExpectedTable<5> expected{{
++      {"ftype", static_cast<std::uint8_t>(TlFieldType::kFlowControlNop)},
++      {"req_cmd", f.req_cmd},
++      {"rsp_cmd", f.rsp_cmd},
++      {"req_data", f.req_data},
++      {"rsp_data", f.rsp_data},
++  }};
++  reader.assert_expected(parsed, expected);
++
++  const auto decoded = deserialize_flow_control_nop_field(bytes);
++  assert(decoded.has_value());
++  assert(decoded->req_cmd == f.req_cmd);
++  assert(decoded->rsp_cmd == f.rsp_cmd);
++  assert(decoded->req_data == f.req_data);
++  assert(decoded->rsp_data == f.rsp_data);
++  std::cout << "PASS\n";
++}
++
++int main() {
++  test_uncompressed_request_field();
++  test_flow_control_nop_field();
++  return 0;
++}

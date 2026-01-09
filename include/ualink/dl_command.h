@@ -13,19 +13,10 @@ namespace ualink::dl {
 
 // DL command opcodes
 enum class DlCommandOp : std::uint8_t {
-  kExplicit = 0,     // Explicit flit with payload
-  kAck = 1,          // Acknowledge received flits
-  kNak = 2,          // Negative acknowledge - request retransmission
-  kLinkTraining = 3, // Link training command
-  kFlowControl = 4,  // Flow control command
-  // 5-7 reserved
-};
-
-// ACK/NAK result for processing
-enum class AckNakStatus {
-  kSuccess,       // Command processed successfully
-  kSequenceError, // Sequence number out of range
-  kNoRetransmit,  // NAK received but no flits to retransmit
+  // Command flits use Table 6-15 opcodes.
+  // Note: explicit (payload/NOP) flits use Table 6-14 and are not command flits.
+  kAck = 0b010,           // Ack
+  kReplayRequest = 0b011, // Standard Replay Request
 };
 
 // Command flit factory functions
@@ -36,38 +27,38 @@ namespace CommandFactory {
 // flit_seq_lo: lower 3 bits of our transmit sequence number
 [[nodiscard]] DlFlit create_ack(std::uint16_t ack_seq, std::uint8_t flit_seq_lo);
 
-// Create a NAK command flit
-// nak_seq: sequence number of first missing flit (request retransmission from here)
+// Create a Standard Replay Request command flit
+// replay_seq: sequence number of first payload flit to replay
 // flit_seq_lo: lower 3 bits of our transmit sequence number
-[[nodiscard]] DlFlit create_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo);
+[[nodiscard]] DlFlit create_replay_request(std::uint16_t replay_seq, std::uint8_t flit_seq_lo);
 
 } // namespace CommandFactory
 
 // Callback types for command processing
 using AckCallback = std::function<void(std::uint16_t ack_seq)>;
-using NakCallback = std::function<void(std::uint16_t nak_seq)>;
+using ReplayRequestCallback = std::function<void(std::uint16_t replay_seq)>;
 
-// DL Command processor - handles ACK/NAK commands
+// DL Command processor - handles ACK / Replay Request commands
 class DlCommandProcessor {
 public:
   DlCommandProcessor();
 
   // Set callbacks for command processing
   void set_ack_callback(AckCallback callback) noexcept;
-  void set_nak_callback(NakCallback callback) noexcept;
+  void set_replay_request_callback(ReplayRequestCallback callback) noexcept;
 
   // Check if callbacks are set
   [[nodiscard]] bool has_ack_callback() const noexcept;
-  [[nodiscard]] bool has_nak_callback() const noexcept;
+  [[nodiscard]] bool has_replay_request_callback() const noexcept;
 
   // Process received DL flit - extracts and handles commands
-  // Returns true if flit was a command (ACK/NAK), false if it was data
+  // Returns true if flit was a command (Ack/Replay Request), false if it was data
   [[nodiscard]] bool process_flit(const DlFlit &flit);
 
   // Deserialize command opcode from flit header
   [[nodiscard]] static DlCommandOp deserialize_command_op(std::span<const std::byte, 3> flit_header);
 
-  // Deserialize ACK/NAK sequence number from command flit
+  // Deserialize ackReqSeq from command flit
   [[nodiscard]] static std::uint16_t deserialize_ack_req_seq(const DlFlit &flit);
 
   // Clear callbacks
@@ -76,9 +67,9 @@ public:
   // Statistics
   struct Stats {
     std::size_t acks_received{0};
-    std::size_t naks_received{0};
+    std::size_t replay_requests_received{0};
     std::size_t acks_sent{0};
-    std::size_t naks_sent{0};
+    std::size_t replay_requests_sent{0};
   };
 
   [[nodiscard]] Stats get_stats() const { return stats_; }
@@ -86,16 +77,16 @@ public:
 
 private:
   AckCallback ack_callback_{};
-  NakCallback nak_callback_{};
+  ReplayRequestCallback replay_request_callback_{};
   Stats stats_{};
 };
 
-// DL ACK/NAK manager - combines sequence tracking with command generation
+// DL command manager - combines sequence tracking with command generation
 class DlAckNakManager {
 public:
   DlAckNakManager();
 
-  // Receive side: track received sequence numbers and generate ACK/NAK
+  // Receive side: track received sequence numbers and generate Ack/Replay Request
   // Returns std::nullopt if no command needed, or the command flit to send
   [[nodiscard]] std::optional<DlFlit> process_received_flit(std::uint16_t received_seq, std::uint8_t our_tx_seq_lo);
 
@@ -108,8 +99,8 @@ public:
   // Manually trigger ACK generation
   [[nodiscard]] DlFlit generate_ack(std::uint16_t ack_seq, std::uint8_t flit_seq_lo);
 
-  // Manually trigger NAK generation
-  [[nodiscard]] DlFlit generate_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo);
+  // Manually trigger Standard Replay Request generation
+  [[nodiscard]] DlFlit generate_replay_request(std::uint16_t replay_seq, std::uint8_t flit_seq_lo);
 
   // Configure ACK policy
   void set_ack_every_n_flits(std::size_t n) noexcept; // 0 = ACK every flit

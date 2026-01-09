@@ -39,16 +39,16 @@ DlFlit CommandFactory::create_ack(std::uint16_t ack_seq, std::uint8_t flit_seq_l
   return flit;
 }
 
-DlFlit CommandFactory::create_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo) {
+DlFlit CommandFactory::create_replay_request(std::uint16_t replay_seq, std::uint8_t flit_seq_lo) {
   UALINK_TRACE_SCOPED(__func__);
 
   DlFlit flit{};
 
   // Build command header
   CommandFlitHeaderFields header{};
-  header.op = static_cast<std::uint8_t>(DlCommandOp::kNak);
+  header.op = static_cast<std::uint8_t>(DlCommandOp::kReplayRequest);
   header.payload = false;
-  header.ack_req_seq = nak_seq; // For NAK, this is the first missing sequence number
+  header.ack_req_seq = replay_seq; // First payload sequence number to replay
   header.flit_seq_lo = flit_seq_lo & 0x7;
 
   flit.flit_header = serialize_command_flit_header(header);
@@ -76,14 +76,14 @@ void DlCommandProcessor::set_ack_callback(AckCallback callback) noexcept {
   ack_callback_ = std::move(callback);
 }
 
-void DlCommandProcessor::set_nak_callback(NakCallback callback) noexcept {
+void DlCommandProcessor::set_replay_request_callback(ReplayRequestCallback callback) noexcept {
   UALINK_TRACE_SCOPED(__func__);
-  nak_callback_ = std::move(callback);
+  replay_request_callback_ = std::move(callback);
 }
 
 bool DlCommandProcessor::has_ack_callback() const noexcept { return ack_callback_ != nullptr; }
 
-bool DlCommandProcessor::has_nak_callback() const noexcept { return nak_callback_ != nullptr; }
+bool DlCommandProcessor::has_replay_request_callback() const noexcept { return replay_request_callback_ != nullptr; }
 
 namespace {
 bool verify_command_crc(const ualink::dl::DlFlit &flit) {
@@ -114,6 +114,10 @@ bool DlCommandProcessor::process_flit(const DlFlit &flit) {
   if (header.payload)
     return false;
 
+  // Spec: command flit with ackReqSeq == 0 is dropped/logged.
+  if (header.ack_req_seq == 0)
+    return true;
+
   const DlCommandOp op = static_cast<DlCommandOp>(header.op);
 
   if (op == DlCommandOp::kAck) {
@@ -125,12 +129,12 @@ bool DlCommandProcessor::process_flit(const DlFlit &flit) {
     return true;
   }
 
-  if (op == DlCommandOp::kNak) {
+  if (op == DlCommandOp::kReplayRequest) {
     if (!verify_command_crc(flit))
       return true; // consume/drop bad command
-    stats_.naks_received++;
-    if (nak_callback_)
-      nak_callback_(header.ack_req_seq);
+    stats_.replay_requests_received++;
+    if (replay_request_callback_)
+      replay_request_callback_(header.ack_req_seq);
     return true;
   }
 
@@ -156,7 +160,7 @@ std::uint16_t DlCommandProcessor::deserialize_ack_req_seq(const DlFlit &flit) {
 void DlCommandProcessor::clear_callbacks() noexcept {
   UALINK_TRACE_SCOPED(__func__);
   ack_callback_ = nullptr;
-  nak_callback_ = nullptr;
+  replay_request_callback_ = nullptr;
 }
 
 void DlCommandProcessor::reset_stats() {
@@ -196,9 +200,9 @@ std::optional<DlFlit> DlAckNakManager::process_received_flit(std::uint16_t recei
     return std::nullopt;
 
   } else {
-    // Out of order - send NAK for expected sequence
+    // Out of order - request replay from the expected sequence
     const std::uint16_t expected = rx_seq_tracker_.expected_seq();
-    return CommandFactory::create_nak(expected, our_tx_seq_lo);
+    return CommandFactory::create_replay_request(expected, our_tx_seq_lo);
   }
 }
 
@@ -215,9 +219,9 @@ DlFlit DlAckNakManager::generate_ack(std::uint16_t ack_seq, std::uint8_t flit_se
   return CommandFactory::create_ack(ack_seq, flit_seq_lo);
 }
 
-DlFlit DlAckNakManager::generate_nak(std::uint16_t nak_seq, std::uint8_t flit_seq_lo) {
+DlFlit DlAckNakManager::generate_replay_request(std::uint16_t replay_seq, std::uint8_t flit_seq_lo) {
   UALINK_TRACE_SCOPED(__func__);
-  return CommandFactory::create_nak(nak_seq, flit_seq_lo);
+  return CommandFactory::create_replay_request(replay_seq, flit_seq_lo);
 }
 
 void DlAckNakManager::set_ack_every_n_flits(std::size_t n) noexcept {

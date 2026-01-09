@@ -96,11 +96,22 @@ struct DlFlit {
 // Forward declarations to avoid circular dependency
 class DlPacingController;
 class DlErrorInjector;
+class DlMessageQueue;
+
+// Result structure for deserializer with DL messages
+struct DlDeserializedResult {
+  std::vector<TlFlit> tl_flits;
+  std::vector<std::array<std::byte, 4>> dl_message_dwords;
+};
 
 class DlSerializer {
 public:
   [[nodiscard]] static DlFlit serialize(std::span<const TlFlit> tl_flits, const ExplicitFlitHeaderFields &header,
                                         std::size_t *flits_serialized = nullptr);
+
+  // Serialize with optional DL message queue (NEW)
+  [[nodiscard]] static DlFlit serialize(std::span<const TlFlit> tl_flits, const ExplicitFlitHeaderFields &header,
+                                        DlMessageQueue *message_queue, std::size_t *flits_serialized = nullptr);
 
   // Serialize with pacing controller
   [[nodiscard]] static DlFlit serialize_with_pacing(std::span<const TlFlit> tl_flits, const ExplicitFlitHeaderFields &header,
@@ -117,6 +128,10 @@ class DlDeserializer {
 public:
   [[nodiscard]] static std::vector<TlFlit> deserialize(const DlFlit &flit);
   [[nodiscard]] static std::optional<std::vector<TlFlit>> deserialize_with_crc_check(const DlFlit &flit);
+
+  // Deserialize with DL message extraction (NEW)
+  [[nodiscard]] static DlDeserializedResult deserialize_ex(const DlFlit &flit);
+  [[nodiscard]] static std::optional<DlDeserializedResult> deserialize_ex_with_crc_check(const DlFlit &flit);
 
   // Deserialize with pacing controller for Rx rate adaptation
   [[nodiscard]] static std::vector<TlFlit> deserialize_with_pacing(const DlFlit &flit, DlPacingController &pacing);

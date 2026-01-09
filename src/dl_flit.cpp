@@ -5,6 +5,7 @@
 
 #include "ualink/crc.h"
 #include "ualink/dl_error_injection.h"
+#include "ualink/dl_message_queue.h"
 #include "ualink/dl_pacing.h"
 
 using namespace ualink::dl;
@@ -38,6 +39,9 @@ std::array<std::byte, 3> ualink::dl::serialize_explicit_flit_header(const Explic
   UALINK_TRACE_SCOPED(__func__);
   if (fields.flit_seq_no > 0x1FF) {
     throw std::invalid_argument("serialize_explicit_flit_header: flit_seq_no out of range");
+  }
+  if (fields.flit_seq_no == 0) {
+    throw std::invalid_argument("serialize_explicit_flit_header: flit_seq_no 0 is reserved");
   }
   if (fields.op > 0x7) {
     throw std::invalid_argument("serialize_explicit_flit_header: op out of range");
@@ -203,6 +207,83 @@ DlFlit ualink::dl::DlSerializer::serialize(std::span<const TlFlit> tl_flits, con
   return flit;
 }
 
+// NEW: Serialize with optional DL message queue
+DlFlit ualink::dl::DlSerializer::serialize(std::span<const TlFlit> tl_flits, const ExplicitFlitHeaderFields &header,
+                                           DlMessageQueue *message_queue, std::size_t *flits_serialized) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // If no message queue, use original serialize
+  if (message_queue == nullptr) {
+    return serialize(tl_flits, header, flits_serialized);
+  }
+
+  DlFlit flit{};
+  flit.flit_header = serialize_explicit_flit_header(header);
+
+  std::array<SegmentHeaderFields, kDlSegmentCount> segment_fields{};
+  std::size_t tl_flit_index = 0;
+
+  // Pack each segment: DL message first (if pending), then TL flits
+  for (std::size_t segment_index = 0; segment_index < kDlSegmentCount; ++segment_index) {
+    const std::size_t segment_start = kSegmentPayloadOffsets[segment_index];
+    std::size_t segment_local_offset = 0;
+
+    // Step 1: Try to pack DL message (priority - placed FIRST in segment)
+    if (message_queue->has_pending_messages()) {
+      auto dword_opt = message_queue->pop_next_dword();
+      if (dword_opt.has_value()) {
+        // Place DL message at start of segment (bytes [0:3] within segment)
+        std::copy_n(dword_opt->begin(), 4, flit.payload.begin() + segment_start);
+        segment_fields[segment_index].dl_alt_sector = true;
+        segment_local_offset = 4; // TL flits start after DL message
+      }
+    }
+
+    // Step 2: Pack TL flits in remaining space
+    const std::size_t remaining_space = kSegmentPayloadBytes[segment_index] - segment_local_offset;
+    const std::size_t max_flits_in_segment = remaining_space / kTlFlitBytes;
+
+    for (std::size_t slot = 0; slot < max_flits_in_segment && tl_flit_index < tl_flits.size(); ++slot) {
+      const std::size_t tl_offset_in_segment = segment_local_offset + (slot * kTlFlitBytes);
+      const std::size_t tl_offset_global = segment_start + tl_offset_in_segment;
+
+      std::copy_n(tl_flits[tl_flit_index].data.begin(), kTlFlitBytes, flit.payload.begin() + tl_offset_global);
+
+      const std::uint8_t message_field = tl_flits[tl_flit_index].message_field & 0x3U;
+      if (slot == 0) {
+        segment_fields[segment_index].tl_flit0_present = true;
+        segment_fields[segment_index].message0 = message_field;
+      } else if (slot == 1) {
+        segment_fields[segment_index].tl_flit1_present = true;
+        segment_fields[segment_index].message1 = message_field;
+      }
+
+      tl_flit_index++;
+    }
+  }
+
+  // Serialize segment headers
+  for (std::size_t segment_index = 0; segment_index < kDlSegmentCount; ++segment_index) {
+    flit.segment_headers[segment_index] = serialize_segment_header(segment_fields[segment_index]);
+  }
+
+  // Compute CRC
+  constexpr std::size_t kCrcCoveredBytes = 3 + kDlSegmentCount + kDlPayloadBytes;
+  std::array<std::byte, kCrcCoveredBytes> crc_buffer{};
+
+  std::copy_n(flit.flit_header.begin(), 3, crc_buffer.begin());
+  std::copy_n(flit.segment_headers.begin(), kDlSegmentCount, crc_buffer.begin() + 3);
+  std::copy_n(flit.payload.begin(), kDlPayloadBytes, crc_buffer.begin() + 3 + kDlSegmentCount);
+
+  flit.crc = compute_crc32(crc_buffer);
+
+  if (flits_serialized != nullptr) {
+    *flits_serialized = tl_flit_index;
+  }
+
+  return flit;
+}
+
 std::vector<TlFlit> ualink::dl::DlDeserializer::deserialize(const DlFlit &flit) {
   UALINK_TRACE_SCOPED(__func__);
   std::vector<TlFlit> tl_flits;
@@ -246,6 +327,61 @@ std::optional<std::vector<TlFlit>> ualink::dl::DlDeserializer::deserialize_with_
   }
 
   return deserialize(flit);
+}
+
+DlDeserializedResult ualink::dl::DlDeserializer::deserialize_ex(const DlFlit &flit) {
+  UALINK_TRACE_SCOPED(__func__);
+  DlDeserializedResult result;
+
+  for (std::size_t segment_index = 0; segment_index < kDlSegmentCount; ++segment_index) {
+    const SegmentHeaderFields header = deserialize_segment_header(flit.segment_headers[segment_index]);
+    const std::size_t segment_offset = kSegmentPayloadOffsets[segment_index];
+    const std::size_t segment_size = kSegmentPayloadBytes[segment_index];
+    std::size_t tl_offset = 0;
+
+    // Extract DL message if present (FIRST 4 bytes of segment)
+    if (header.dl_alt_sector) {
+      std::array<std::byte, 4> dword;
+      std::copy_n(flit.payload.begin() + segment_offset, 4, dword.begin());
+      result.dl_message_dwords.push_back(dword);
+      tl_offset = 4; // TL flits start after DL message
+    }
+
+    // Extract TL flits from remaining space
+    if (header.tl_flit0_present && (segment_size - tl_offset) >= kTlFlitBytes) {
+      TlFlit tl_flit{};
+      std::copy_n(flit.payload.begin() + segment_offset + tl_offset, kTlFlitBytes, tl_flit.data.begin());
+      tl_flit.message_field = header.message0;
+      result.tl_flits.push_back(tl_flit);
+    }
+
+    if (header.tl_flit1_present && (segment_size - tl_offset) >= (2 * kTlFlitBytes)) {
+      TlFlit tl_flit{};
+      std::copy_n(flit.payload.begin() + segment_offset + tl_offset + kTlFlitBytes, kTlFlitBytes, tl_flit.data.begin());
+      tl_flit.message_field = header.message1;
+      result.tl_flits.push_back(tl_flit);
+    }
+  }
+
+  return result;
+}
+
+std::optional<DlDeserializedResult> ualink::dl::DlDeserializer::deserialize_ex_with_crc_check(const DlFlit &flit) {
+  UALINK_TRACE_SCOPED(__func__);
+
+  // Verify CRC over flit_header + segment_headers + payload
+  constexpr std::size_t kCrcCoveredBytes = 3 + kDlSegmentCount + kDlPayloadBytes;
+  std::array<std::byte, kCrcCoveredBytes> crc_buffer{};
+
+  std::copy_n(flit.flit_header.begin(), 3, crc_buffer.begin());
+  std::copy_n(flit.segment_headers.begin(), kDlSegmentCount, crc_buffer.begin() + 3);
+  std::copy_n(flit.payload.begin(), kDlPayloadBytes, crc_buffer.begin() + 3 + kDlSegmentCount);
+
+  if (!verify_crc32(crc_buffer, flit.crc)) {
+    return std::nullopt;
+  }
+
+  return deserialize_ex(flit);
 }
 
 DlFlit ualink::dl::DlSerializer::serialize_with_pacing(std::span<const TlFlit> tl_flits, const ExplicitFlitHeaderFields &header,

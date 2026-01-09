@@ -9,15 +9,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" F
 
 add_library(ualink_model STATIC
   src/dl_flit.cpp
+  src/dl_messages.cpp
+  src/dl_message_queue.cpp
   src/crc.cpp
   src/dl_replay.cpp
   src/dl_pacing.cpp
   src/dl_error_injection.cpp
   src/dl_command.cpp
   src/tl_flit.cpp
+  src/tl_fields.cpp
+  src/security_iv.cpp
   src/ualink_endpoint.cpp
   src/upli_channel.cpp
   src/upli_credit.cpp
+  src/upli_message.cpp
 )
 
 target_include_directories(ualink_model
@@ -182,3 +187,101 @@ target_include_directories(ualink_upli_credit_test
 )
 
 add_test(NAME ualink_upli_credit_test COMMAND ualink_upli_credit_test)
+
+add_executable(ualink_upli_message_test
+  tests/upli_message_test.cpp
+)
+
+target_link_libraries(ualink_upli_message_test PRIVATE ualink_model)
+
+target_include_directories(ualink_upli_message_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_upli_message_test COMMAND ualink_upli_message_test)
+
+add_executable(ualink_dl_messages_test
+  tests/dl_messages_test.cpp
+)
+
+target_link_libraries(ualink_dl_messages_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_messages_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_messages_test COMMAND ualink_dl_messages_test)
+
+add_executable(ualink_tl_fields_test
+  tests/tl_fields_test.cpp
+)
+
+target_link_libraries(ualink_tl_fields_test PRIVATE ualink_model)
+
+target_include_directories(ualink_tl_fields_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_tl_fields_test COMMAND ualink_tl_fields_test)
+
+add_executable(ualink_security_iv_test
+  tests/security_iv_test.cpp
+)
+
+target_link_libraries(ualink_security_iv_test PRIVATE ualink_model)
+
+target_include_directories(ualink_security_iv_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_security_iv_test COMMAND ualink_security_iv_test)
+
+add_executable(ualink_dl_link_state_test
+  tests/dl_link_state_test.cpp
+)
+
+target_link_libraries(ualink_dl_link_state_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_link_state_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_link_state_test COMMAND ualink_dl_link_state_test)
+
+add_executable(ualink_dl_message_queue_test
+  tests/dl_message_queue_test.cpp
+)
+
+target_link_libraries(ualink_dl_message_queue_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_message_queue_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_message_queue_test COMMAND ualink_dl_message_queue_test)
+
+add_executable(ualink_dl_flit_message_integration_test
+  tests/dl_flit_message_integration_test.cpp
+)
+
+target_link_libraries(ualink_dl_flit_message_integration_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_flit_message_integration_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_flit_message_integration_test COMMAND ualink_dl_flit_message_integration_test)

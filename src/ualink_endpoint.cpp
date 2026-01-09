@@ -7,9 +7,8 @@ using namespace ualink;
 using namespace ualink::tl;
 using namespace ualink::dl;
 
-UaLinkEndpoint::UaLinkEndpoint(const EndpointConfig& config)
-    : enable_crc_check_(config.enable_crc_check),
-      enable_ack_nak_(config.enable_ack_nak) {
+UaLinkEndpoint::UaLinkEndpoint(const EndpointConfig &config)
+    : enable_crc_check_(config.enable_crc_check), enable_ack_nak_(config.enable_ack_nak) {
   UALINK_TRACE_SCOPED(__func__);
 
   // Configure pacing if provided
@@ -36,9 +35,9 @@ UaLinkEndpoint::UaLinkEndpoint(const EndpointConfig& config)
       stats_.rx_acks_received++;
     });
 
-    command_processor_.set_nak_callback([this](std::uint16_t nak_seq) {
-      replay_from(nak_seq);
-      stats_.rx_naks_received++;
+    command_processor_.set_replay_request_callback([this](std::uint16_t replay_seq) {
+      replay_from(replay_seq);
+      stats_.rx_replay_requests_received++;
       stats_.retransmissions++;
     });
   }
@@ -78,7 +77,7 @@ std::uint16_t UaLinkEndpoint::send_read_request(std::uint64_t address, std::uint
   return tag;
 }
 
-std::uint16_t UaLinkEndpoint::send_write_request(std::uint64_t address, std::uint8_t size, const std::vector<std::byte>& data) {
+std::uint16_t UaLinkEndpoint::send_write_request(std::uint64_t address, std::uint8_t size, const std::vector<std::byte> &data) {
   UALINK_TRACE_SCOPED(__func__);
 
   if (!transmit_callback_) {
@@ -124,7 +123,7 @@ void UaLinkEndpoint::set_transmit_callback(TransmitCallback callback) {
   transmit_callback_ = std::move(callback);
 }
 
-void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
+void UaLinkEndpoint::receive_flit(const DlFlit &flit) {
   UALINK_TRACE_SCOPED(__func__);
 
   stats_.rx_dl_flits++;
@@ -151,7 +150,7 @@ void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
     const auto result = DlDeserializer::deserialize_with_crc_and_pacing(flit, pacing_controller_);
     if (!result.has_value()) {
       stats_.rx_crc_errors++;
-      return;  // CRC check failed
+      return; // CRC check failed
     }
     tl_flits = std::move(*result);
     stats_.rx_flits_with_pacing++;
@@ -160,7 +159,7 @@ void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
     const auto result = DlDeserializer::deserialize_with_crc_check(flit);
     if (!result.has_value()) {
       stats_.rx_crc_errors++;
-      return;  // CRC check failed
+      return; // CRC check failed
     }
     tl_flits = std::move(*result);
   } else if (pacing_controller_.has_rx_callback()) {
@@ -174,7 +173,7 @@ void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
 
   // Generate ACK/NAK if enabled
   if (enable_ack_nak_ && transmit_callback_) {
-    const std::uint8_t our_tx_seq_lo = tx_seq_ & 0x7;
+    const std::uint8_t our_tx_seq_lo = tx_last_seq_ & 0x7;
     const auto command_flit = ack_nak_manager_.process_received_flit(received_seq, our_tx_seq_lo);
     if (command_flit.has_value()) {
       // Send ACK or NAK
@@ -184,14 +183,14 @@ void UaLinkEndpoint::receive_flit(const DlFlit& flit) {
       const DlCommandOp op = command_processor_.deserialize_command_op(command_flit->flit_header);
       if (op == DlCommandOp::kAck) {
         stats_.tx_acks_sent++;
-      } else if (op == DlCommandOp::kNak) {
-        stats_.tx_naks_sent++;
+      } else if (op == DlCommandOp::kReplayRequest) {
+        stats_.tx_replay_requests_sent++;
       }
     }
   }
 
   // Process each TL flit
-  for (const auto& tl_flit : tl_flits) {
+  for (const auto &tl_flit : tl_flits) {
     handle_tl_flit(tl_flit);
   }
 }
@@ -220,7 +219,7 @@ void UaLinkEndpoint::replay_from(std::uint16_t seq) {
   }
 
   const auto flits = replay_buffer_.process_nak(seq);
-  for (const auto& flit : flits) {
+  for (const auto &flit : flits) {
     transmit_callback_(flit);
   }
 }
@@ -260,7 +259,7 @@ void UaLinkEndpoint::clear_pacing_callbacks() {
   pacing_controller_.clear_callbacks();
 }
 
-void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
+void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit> &tl_flits) {
   UALINK_TRACE_SCOPED(__func__);
 
   if (!transmit_callback_) {
@@ -273,9 +272,14 @@ void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
 
   // Build DL header
   ExplicitFlitHeaderFields header{};
-  header.op = 0;  // Explicit flit
+  header.op = 0; // Explicit flit
   header.payload = true;
-  header.flit_seq_no = tx_seq_;
+  const auto next_seq = [](std::uint16_t last_seq) -> std::uint16_t {
+    // Valid sequence numbers are 1..511, 0 reserved. 511 wraps to 1.
+    const std::uint16_t mod = static_cast<std::uint16_t>(last_seq % 511U);
+    return static_cast<std::uint16_t>(mod + 1U);
+  };
+  header.flit_seq_no = next_seq(tx_last_seq_);
 
   // Serialize TL → DL with pacing and error injection
   std::size_t packed = 0;
@@ -293,7 +297,7 @@ void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
     }
     if (pacing_decision == PacingDecision::kThrottle) {
       stats_.tx_dropped_by_pacing++;
-      return;  // For now, treat throttle as drop
+      return; // For now, treat throttle as drop
     }
 
     // Apply error injection
@@ -328,7 +332,7 @@ void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
   }
 
   // Store in replay buffer
-  [[maybe_unused]] const bool added = replay_buffer_.add_flit(tx_seq_, dl_flit);
+  [[maybe_unused]] const bool added = replay_buffer_.add_flit(header.flit_seq_no, dl_flit);
   stats_.replay_buffer_size = replay_buffer_.size();
 
   // Transmit
@@ -336,10 +340,10 @@ void UaLinkEndpoint::transmit_tl_flits(const std::vector<TlFlit>& tl_flits) {
   stats_.tx_dl_flits++;
 
   // Increment sequence number
-  tx_seq_++;
+  tx_last_seq_ = header.flit_seq_no;
 }
 
-void UaLinkEndpoint::handle_tl_flit(const TlFlit& tl_flit) {
+void UaLinkEndpoint::handle_tl_flit(const TlFlit &tl_flit) {
   UALINK_TRACE_SCOPED(__func__);
 
   // Deserialize opcode from flit data
@@ -374,6 +378,6 @@ void UaLinkEndpoint::handle_tl_flit(const TlFlit& tl_flit) {
 std::uint16_t UaLinkEndpoint::allocate_tag() {
   UALINK_TRACE_SCOPED(__func__);
   const std::uint16_t tag = next_tag_;
-  next_tag_ = (next_tag_ + 1) & 0xFFF;  // 12-bit tag space
+  next_tag_ = (next_tag_ + 1) & 0xFFF; // 12-bit tag space
   return tag;
 }

@@ -15,6 +15,11 @@ namespace ualink::upli {
 constexpr std::size_t kMaxPorts = 4;
 constexpr std::size_t kUpliDataBeatBytes = 64;
 
+// UPLI Channel Flit - raw 64-byte message container
+struct UpliChannelFlit {
+  std::array<std::byte, kUpliDataBeatBytes> data{};
+};
+
 // =============================================================================
 // UPLI Request Channel Format
 // =============================================================================

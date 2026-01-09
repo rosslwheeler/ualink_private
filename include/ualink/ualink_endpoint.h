@@ -18,11 +18,11 @@
 namespace ualink {
 
 // Transaction completion callback types
-using ReadCompletionCallback = std::function<void(std::uint16_t tag, std::uint8_t status, const std::vector<std::byte>& data)>;
+using ReadCompletionCallback = std::function<void(std::uint16_t tag, std::uint8_t status, const std::vector<std::byte> &data)>;
 using WriteCompletionCallback = std::function<void(std::uint16_t tag, std::uint8_t status)>;
 
 // Transmit callback - called when DL flit is ready to send on wire
-using TransmitCallback = std::function<void(const dl::DlFlit& flit)>;
+using TransmitCallback = std::function<void(const dl::DlFlit &flit)>;
 
 // Configuration for UaLinkEndpoint
 struct EndpointConfig {
@@ -48,7 +48,7 @@ struct EndpointConfig {
 // Automatically handles TL→DL serialization, replay buffering, pacing, and error injection
 class UaLinkEndpoint {
 public:
-  explicit UaLinkEndpoint(const EndpointConfig& config = EndpointConfig{});
+  explicit UaLinkEndpoint(const EndpointConfig &config = EndpointConfig{});
 
   // === Transmit API ===
 
@@ -58,7 +58,7 @@ public:
 
   // Send a write request
   // Returns: transaction tag assigned to this request
-  [[nodiscard]] std::uint16_t send_write_request(std::uint64_t address, std::uint8_t size, const std::vector<std::byte>& data);
+  [[nodiscard]] std::uint16_t send_write_request(std::uint64_t address, std::uint8_t size, const std::vector<std::byte> &data);
 
   // Set transmit callback - must be set before calling send_*
   void set_transmit_callback(TransmitCallback callback);
@@ -68,7 +68,7 @@ public:
   // Receive a DL flit from the wire
   // Automatically deserializes DL→TL, checks CRC, applies pacing
   // Triggers completion callbacks for matching transactions
-  void receive_flit(const dl::DlFlit& flit);
+  void receive_flit(const dl::DlFlit &flit);
 
   // Set completion callbacks
   void set_read_completion_callback(ReadCompletionCallback callback);
@@ -79,11 +79,11 @@ public:
   // Process ACK - removes acknowledged flits from replay buffer
   void process_ack(std::uint16_t ack_seq);
 
-  // Replay flits starting from sequence number (for NACK handling)
+  // Replay flits starting from sequence number (for Replay Request handling)
   void replay_from(std::uint16_t seq);
 
   // Get current transmit sequence number
-  [[nodiscard]] std::uint16_t get_tx_seq() const { return tx_seq_; }
+  [[nodiscard]] std::uint16_t get_tx_seq() const { return tx_last_seq_; }
 
   // === Statistics ===
 
@@ -94,7 +94,7 @@ public:
     std::size_t tx_dropped_by_pacing{0};
     std::size_t tx_dropped_by_error_injection{0};
     std::size_t tx_acks_sent{0};
-    std::size_t tx_naks_sent{0};
+    std::size_t tx_replay_requests_sent{0};
 
     std::size_t rx_read_responses{0};
     std::size_t rx_write_completions{0};
@@ -102,7 +102,7 @@ public:
     std::size_t rx_crc_errors{0};
     std::size_t rx_flits_with_pacing{0};
     std::size_t rx_acks_received{0};
-    std::size_t rx_naks_received{0};
+    std::size_t rx_replay_requests_received{0};
 
     std::size_t replay_buffer_size{0};
     std::size_t retransmissions{0};
@@ -125,8 +125,8 @@ public:
 
 private:
   // Internal state
-  std::uint16_t tx_seq_{0};       // Current transmit sequence number
-  std::uint16_t next_tag_{0};     // Next transaction tag to assign
+  std::uint16_t tx_last_seq_{0x1FF}; // Last sequence number added to TxReplay (default 0x1FF)
+  std::uint16_t next_tag_{0};        // Next transaction tag to assign
 
   // Components
   dl::DlReplayBuffer replay_buffer_;
@@ -148,9 +148,9 @@ private:
   Stats stats_;
 
   // Helper methods
-  void transmit_tl_flits(const std::vector<dl::TlFlit>& tl_flits);
-  void handle_tl_flit(const dl::TlFlit& tl_flit);
+  void transmit_tl_flits(const std::vector<dl::TlFlit> &tl_flits);
+  void handle_tl_flit(const dl::TlFlit &tl_flit);
   std::uint16_t allocate_tag();
 };
 
-}  // namespace ualink
+} // namespace ualink

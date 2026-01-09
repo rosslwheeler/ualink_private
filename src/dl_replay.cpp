@@ -4,11 +4,9 @@
 
 using namespace ualink::dl;
 
-DlReplayBuffer::DlReplayBuffer() {
-  UALINK_TRACE_SCOPED(__func__);
-}
+DlReplayBuffer::DlReplayBuffer() { UALINK_TRACE_SCOPED(__func__); }
 
-bool DlReplayBuffer::add_flit(std::uint16_t seq_no, const DlFlit& flit) {
+bool DlReplayBuffer::add_flit(std::uint16_t seq_no, const DlFlit &flit) {
   UALINK_TRACE_SCOPED(__func__);
 
   if (is_full()) {
@@ -87,17 +85,11 @@ std::span<const DlFlit> DlReplayBuffer::process_nak(std::uint16_t nak_seq) {
   return {};
 }
 
-std::size_t DlReplayBuffer::size() const noexcept {
-  return count_;
-}
+std::size_t DlReplayBuffer::size() const noexcept { return count_; }
 
-bool DlReplayBuffer::is_full() const noexcept {
-  return count_ == kReplayBufferSize;
-}
+bool DlReplayBuffer::is_full() const noexcept { return count_ == kReplayBufferSize; }
 
-bool DlReplayBuffer::is_empty() const noexcept {
-  return count_ == 0;
-}
+bool DlReplayBuffer::is_empty() const noexcept { return count_ == 0; }
 
 std::optional<std::uint16_t> DlReplayBuffer::oldest_seq() const noexcept {
   if (is_empty()) {
@@ -124,13 +116,9 @@ void DlReplayBuffer::clear() noexcept {
   count_ = 0;
 }
 
-DlSequenceTracker::DlSequenceTracker() {
-  UALINK_TRACE_SCOPED(__func__);
-}
+DlSequenceTracker::DlSequenceTracker() { UALINK_TRACE_SCOPED(__func__); }
 
-bool DlSequenceTracker::is_expected(std::uint16_t seq_no) const noexcept {
-  return seq_no == expected_seq_;
-}
+bool DlSequenceTracker::is_expected(std::uint16_t seq_no) const noexcept { return seq_no == expected_seq_; }
 
 bool DlSequenceTracker::is_duplicate(std::uint16_t seq_no) const noexcept {
   // A duplicate is a sequence number that is before the expected one
@@ -151,15 +139,11 @@ bool DlSequenceTracker::is_duplicate(std::uint16_t seq_no) const noexcept {
   return false;
 }
 
-void DlSequenceTracker::advance() noexcept {
-  expected_seq_ = (expected_seq_ + 1) % kSequenceModulo;
-}
+void DlSequenceTracker::advance() noexcept { expected_seq_ = (expected_seq_ + 1) % kSequenceModulo; }
 
-std::uint16_t DlSequenceTracker::expected_seq() const noexcept {
-  return expected_seq_;
-}
+std::uint16_t DlSequenceTracker::expected_seq() const noexcept { return expected_seq_; }
 
 void DlSequenceTracker::reset() noexcept {
   UALINK_TRACE_SCOPED(__func__);
-  expected_seq_ = 0;
+  expected_seq_ = 1;
 }

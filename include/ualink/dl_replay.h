@@ -19,10 +19,10 @@ constexpr std::size_t kReplayBufferSize = 512;
 constexpr std::uint16_t kSequenceModulo = 512;
 
 enum class AckNakResult {
-  kAckReceived,      // ACK processed, flits retired from buffer
-  kNakReceived,      // NAK received, retransmission needed
-  kSequenceError,    // Sequence number out of range
-  kBufferEmpty,      // No flits to acknowledge
+  kAckReceived,   // ACK processed, flits retired from buffer
+  kNakReceived,   // NAK received, retransmission needed
+  kSequenceError, // Sequence number out of range
+  kBufferEmpty,   // No flits to acknowledge
 };
 
 // Replay buffer for link-level reliability
@@ -33,7 +33,7 @@ public:
 
   // Add a flit to the replay buffer with its sequence number
   // Returns false if buffer is full
-  [[nodiscard]] bool add_flit(std::uint16_t seq_no, const DlFlit& flit);
+  [[nodiscard]] bool add_flit(std::uint16_t seq_no, const DlFlit &flit);
 
   // Process an ACK command - retire all flits up to and including ack_seq
   // Returns the number of flits retired
@@ -95,7 +95,7 @@ public:
   void reset() noexcept;
 
 private:
-  std::uint16_t expected_seq_{0};
+  std::uint16_t expected_seq_{1};
 };
 
-}  // namespace ualink::dl
+} // namespace ualink::dl
