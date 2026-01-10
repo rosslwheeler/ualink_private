@@ -129,7 +129,7 @@ static void test_uart_stream_transport_multi_dword() {
 
   // Create UART Stream Transport with 3 payload DWords
   UartStreamTransportMessage msg{};
-  msg.stream_id = 0x1;
+  msg.stream_id = 0;
   msg.common = make_common(DlUartMessageType::kStreamTransportMessage);
   msg.payload_dwords = {0x11111111U, 0x22222222U, 0x33333333U};
 
@@ -169,7 +169,7 @@ static void test_uart_blocking_other_groups() {
 
   // Enqueue UART Stream Transport (multi-DWord)
   UartStreamTransportMessage uart{};
-  uart.stream_id = 0x2;
+  uart.stream_id = 0;
   uart.common = make_common(DlUartMessageType::kStreamTransportMessage);
   uart.payload_dwords = {0xAAAAAAAAU, 0xBBBBBBBBU};
   queue.enqueue(uart);

@@ -287,7 +287,7 @@ static void test_uart_stream_transport_multi_flit() {
 
   // Create UART Stream Transport with 3 payload DWords
   UartStreamTransportMessage uart{};
-  uart.stream_id = 0x5;
+  uart.stream_id = 0;
   uart.common = make_common(DlUartMessageType::kStreamTransportMessage);
   uart.payload_dwords = {0x11111111U, 0x22222222U, 0x33333333U};
   queue.enqueue(uart);

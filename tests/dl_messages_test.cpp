@@ -14,7 +14,7 @@ int main() {
   {
     UartStreamResetRequest msg{};
     msg.all_streams = true;
-    msg.stream_id = 0x5;
+    msg.stream_id = 0;
     msg.common = make_common(DlUartMessageType::kStreamResetRequest);
 
     const auto bytes = serialize_uart_stream_reset_request(msg);
@@ -44,7 +44,7 @@ int main() {
     UartStreamResetResponse msg{};
     msg.status = 0x6;
     msg.all_streams = false;
-    msg.stream_id = 0x1;
+    msg.stream_id = 0;
     msg.common = make_common(DlUartMessageType::kStreamResetResponse);
 
     const auto bytes = serialize_uart_stream_reset_response(msg);
@@ -75,7 +75,7 @@ int main() {
   {
     UartStreamCreditUpdate msg{};
     msg.data_fc_seq = 0xAAA;
-    msg.stream_id = 0x2;
+    msg.stream_id = 0;
     msg.common = make_common(DlUartMessageType::kStreamCreditUpdate);
 
     const auto bytes = serialize_uart_stream_credit_update(msg);
@@ -103,7 +103,7 @@ int main() {
 
   {
     UartStreamTransportMessage msg{};
-    msg.stream_id = 0x3;
+    msg.stream_id = 0;
     msg.common = make_common(DlUartMessageType::kStreamTransportMessage);
     msg.payload_dwords = {0x11223344U, 0xAABBCCDDU};
 

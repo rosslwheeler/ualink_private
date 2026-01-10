@@ -43,8 +43,8 @@ static std::uint32_t load_be32(std::span<const std::byte, 4> in) {
 std::array<std::byte, 4> serialize_uart_stream_reset_request(const UartStreamResetRequest &msg) {
   UALINK_TRACE_SCOPED(__func__);
   validate_common(msg.common);
-  if (!fits_in_bits(msg.stream_id, 3)) {
-    throw std::invalid_argument("UART Stream Reset Request: stream_id out of range");
+  if (msg.stream_id != 0) {
+    throw std::invalid_argument("UART Stream Reset Request: stream_id must be 0 (only stream 0 supported)");
   }
 
   std::array<std::byte, 4> out{};
@@ -83,8 +83,8 @@ std::array<std::byte, 4> serialize_uart_stream_reset_response(const UartStreamRe
   if (!fits_in_bits(msg.status, 3)) {
     throw std::invalid_argument("UART Stream Reset Response: status out of range");
   }
-  if (!fits_in_bits(msg.stream_id, 3)) {
-    throw std::invalid_argument("UART Stream Reset Response: stream_id out of range");
+  if (msg.stream_id != 0) {
+    throw std::invalid_argument("UART Stream Reset Response: stream_id must be 0 (only stream 0 supported)");
   }
 
   std::array<std::byte, 4> out{};
@@ -120,8 +120,8 @@ std::optional<UartStreamResetResponse> deserialize_uart_stream_reset_response(st
 std::vector<std::byte> serialize_uart_stream_transport_message(const UartStreamTransportMessage &msg) {
   UALINK_TRACE_SCOPED(__func__);
   validate_common(msg.common);
-  if (!fits_in_bits(msg.stream_id, 3)) {
-    throw std::invalid_argument("UART Stream transport: stream_id out of range");
+  if (msg.stream_id != 0) {
+    throw std::invalid_argument("UART Stream transport: stream_id must be 0 (only stream 0 supported)");
   }
   if (msg.payload_dwords.empty()) {
     throw std::invalid_argument("UART Stream transport: payload must be >= 1 dword");
@@ -194,8 +194,8 @@ std::array<std::byte, 4> serialize_uart_stream_credit_update(const UartStreamCre
   if (!fits_in_bits(msg.data_fc_seq, 12)) {
     throw std::invalid_argument("UART Stream Credit Update: data_fc_seq out of range");
   }
-  if (!fits_in_bits(msg.stream_id, 3)) {
-    throw std::invalid_argument("UART Stream Credit Update: stream_id out of range");
+  if (msg.stream_id != 0) {
+    throw std::invalid_argument("UART Stream Credit Update: stream_id must be 0 (only stream 0 supported)");
   }
 
   std::array<std::byte, 4> out{};
@@ -297,6 +297,8 @@ std::optional<DeviceIdMessage> deserialize_device_id_message(std::span<const std
 std::array<std::byte, 4> serialize_port_id_message(const PortIdMessage &msg) {
   UALINK_TRACE_SCOPED(__func__);
   validate_common(msg.common);
+  // Note: Spec prose says "10-bit port number" but bit field table shows 27:16 (12 bits).
+  // We follow the bit field table as authoritative for wire format.
   if (!fits_in_bits(msg.port_number, 12)) {
     throw std::invalid_argument("Port ID: port_number out of range");
   }
@@ -364,6 +366,10 @@ std::array<std::byte, 4> serialize_channel_negotiation(const ChannelNegotiation 
   validate_common(msg.common);
   if (!fits_in_bits(msg.channel_response, 4) || !fits_in_bits(msg.channel_command, 4) || !fits_in_bits(msg.channel_target, 4)) {
     throw std::invalid_argument("Channel Negotiation: channel fields out of range");
+  }
+  // Validate channel_command has legal values (Request=0, Ack=1, NAck=2, Pending=3)
+  if (msg.channel_command > 0b0011) {
+    throw std::invalid_argument("Channel Negotiation: channel_command must be Request(0), Ack(1), NAck(2), or Pending(3)");
   }
 
   std::array<std::byte, 4> out{};

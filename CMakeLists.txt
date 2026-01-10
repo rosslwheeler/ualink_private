@@ -11,6 +11,8 @@ add_library(ualink_model STATIC
   src/dl_flit.cpp
   src/dl_messages.cpp
   src/dl_message_queue.cpp
+  src/dl_message_processor.cpp
+  src/dl_tx_controller.cpp
   src/crc.cpp
   src/dl_replay.cpp
   src/dl_pacing.cpp
@@ -285,3 +287,45 @@ target_include_directories(ualink_dl_flit_message_integration_test
 )
 
 add_test(NAME ualink_dl_flit_message_integration_test COMMAND ualink_dl_flit_message_integration_test)
+
+add_executable(ualink_dl_message_processor_test
+  tests/dl_message_processor_test.cpp
+)
+
+target_link_libraries(ualink_dl_message_processor_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_message_processor_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_message_processor_test COMMAND ualink_dl_message_processor_test)
+
+add_executable(ualink_dl_end_to_end_test
+  tests/dl_end_to_end_test.cpp
+)
+
+target_link_libraries(ualink_dl_end_to_end_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_end_to_end_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_end_to_end_test COMMAND ualink_dl_end_to_end_test)
+
+add_executable(ualink_dl_tx_controller_test
+  tests/dl_tx_controller_test.cpp
+)
+
+target_link_libraries(ualink_dl_tx_controller_test PRIVATE ualink_model)
+
+target_include_directories(ualink_dl_tx_controller_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    /home/ross/OSS/ai/bit_fields_private/include
+)
+
+add_test(NAME ualink_dl_tx_controller_test COMMAND ualink_dl_tx_controller_test)
